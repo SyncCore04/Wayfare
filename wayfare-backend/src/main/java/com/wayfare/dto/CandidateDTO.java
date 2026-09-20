@@ -123,7 +123,13 @@ public class CandidateDTO implements Serializable {
         return lng != null && lat != null;
     }
 
-    /** 是否为餐饮点。P3-D 的「每天至少 1 个 FOOD」与 P3-E 的忌口校验都靠它 */
+    /**
+     * 是否为餐饮点。P3-D 的「每天至少 1 个 FOOD」与 P3-E 的忌口校验都靠它。
+     *
+     * <p>{@code @JsonIgnore}：否则 Jackson 会把它序列化成一个 {@code food} 字段漏进接口响应。
+     * （{@code hasLocation()} 不受影响 —— Jackson 默认只认 {@code isXxx}/{@code getXxx}。）
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnore
     public boolean isFood() {
         return TripItem.TYPE_FOOD.equals(itemType);
     }
