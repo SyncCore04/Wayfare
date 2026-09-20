@@ -1,0 +1,169 @@
+# =====================================================================
+# Wayfare（行走集）后端配置
+# ---------------------------------------------------------------------
+# 约定：
+#   1. 所有密钥走「占位符 + 环境变量覆盖」，禁止写真实 Key 进本文件
+#   2. L1 启动期配置 = 本文件；L2 运行期开关 = sys_config 表 + Redis（改完不重启生效）
+#      读取优先级 L2 覆盖 L1，L2 未配置时回落 L1
+#   3. 键名与《Wayfare 开发文档》12.2 节、P1-A 任务块保持一致，后续阶段只增不改
+# =====================================================================
+
+server:
+  port: 8080
+  servlet:
+    # 前端 request.js 的 baseURL 是 /api，所以 context-path 必须是 /api，
+    # 否则 HealthController 的真实地址就不是 /api/health
+    context-path: /api
+
+spring:
+  application:
+    name: wayfare-backend
+
+  # ---------- 本地开发密钥 ----------
+  # 把 GLM/DEEPSEEK/百度的 Key 写在 wayfare-backend/.env.properties 里（该文件已被 .gitignore 排除）。
+  # 用 optional: 前缀是关键 —— 没有这个文件也不影响启动，
+  # 别人 clone 仓库后不需要任何密钥就能把全链路跑起来（会自动回落到 Mock）。
+  config:
+    import: optional:file:./.env.properties
+
+  # ---------- 数据源 ----------
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/wayfare?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    # 密码不写进仓库：在本目录建 .env.properties（已 gitignore）填 MYSQL_ROOT_PASSWORD=你的密码
+    # 也可以用系统环境变量。本地开发默认密码见 .env.properties.example 的说明
+    password: "${MYSQL_ROOT_PASSWORD:}"
+
+  # ---------- Redis ----------
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password:
+      database: 0
+      timeout: 5000ms
+      # 池化配置生效的前提是类路径上有 commons-pool2（已在 pom 显式引入）
+      lettuce:
+        pool:
+          max-active: 8
+          max-wait: -1ms
+          max-idle: 8
+          min-idle: 0
+
+  # ---------- Jackson ----------
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+    default-property-inclusion: non_null
+
+  # ---------- 文件上传 ----------
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 10MB
+      max-request-size: 100MB
+
+# ---------- 应用自身标识（HealthController 回显用） ----------
+app:
+  name: wayfare
+  version: 1.0.0
+
+# ---------- 文件存储（映射到 FileStorageProperties，键名不可随意改） ----------
+file:
+  upload:
+    # 上传根目录：已迁到本项目下，切勿再指向旧工作区 毕设/uploads
+    upload-dir: D:/Code/Vibe coding test/Wayfare/wayfare-backend/uploads
+    access-prefix: /uploads
+    allowed-types: image/jpeg,image/png,image/gif,image/webp,image/bmp
+    allowed-extensions: jpg,jpeg,png,gif,webp,bmp
+    max-file-size: 10485760
+    watermark-text: 行走集 Wayfare
+    watermark-font-size: 36
+    watermark-opacity: 0.3
+    watermark-color: 255,255,255
+
+# ---------- 内容审核 ----------
+content:
+  audit:
+    sensitive-words: 色情,暴力,赌博,毒品,诈骗,反动,政治敏感,广告推广,联系方式,涉黄,涉暴
+
+# ---------- MyBatis-Plus ----------
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  type-aliases-package: com.wayfare.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    # 用 Slf4j 实现而非 StdOutImpl：SQL 走统一日志系统，便于按级别开关
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# ---------- JWT（自建 JwtInterceptor 用，不引 Spring Security） ----------
+jwt:
+  # HS256 要求密钥不少于 32 字节，生产环境务必用环境变量覆盖
+  secret: "${JWT_SECRET:wayfare-dev-only-secret-key-please-change-in-production-2026}"
+  expiration: 604800000
+  header: Authorization
+  prefix: "Bearer "
+
+# ---------- 接口文档 ----------
+# 注意：context-path 是 /api，所以真实入口是
+#   http://localhost:8080/api/swagger-ui/index.html
+springdoc:
+  api-docs:
+    enabled: true
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  packages-to-scan: com.wayfare.controller
+
+# =====================================================================
+# 以下两段为 P1 阶段（可插拔连接器层）预留，键名与 P1-A 任务块一致。
+# P0-A 尚无对应实体类，Spring 会忽略未知键，不影响启动。
+# =====================================================================
+
+# ---------- 大模型：只支持 GLM（智谱）与 DeepSeek，均走 OpenAI 兼容协议 ----------
+llm:
+  enabled: true
+  # L2 的 sys_config 优先于此
+  active-provider: glm
+  fallback-order: glm,deepseek
+  timeout-ms: 90000
+  providers:
+    glm:
+      base-url: https://open.bigmodel.cn/api/paas/v4
+      api-key: "${GLM_API_KEY:}"
+      # 开发调试用 flash（几乎不花钱），最终演示换 glm-4-plus
+      model: glm-4-flash
+      temperature: 0.3
+      max-tokens: 4096
+    deepseek:
+      base-url: https://api.deepseek.com/v1
+      api-key: "${DEEPSEEK_API_KEY:}"
+      model: deepseek-chat
+      temperature: 0.3
+      max-tokens: 4096
+
+# ---------- 地图：默认整体关闭。无 AK 也能开发，关闭属「能力降级」而非功能降级 ----------
+map:
+  enabled: false
+  baidu:
+    ak: "${BAIDU_MAP_AK:}"
+    base-url: https://api.map.baidu.com
+    connect-timeout-ms: 3000
+    read-timeout-ms: 8000
+
+# ---------- 日志 ----------
+logging:
+  level:
+    com.wayfare: debug
+    org.springframework.web: info
+    com.baomidou.mybatisplus: warn
