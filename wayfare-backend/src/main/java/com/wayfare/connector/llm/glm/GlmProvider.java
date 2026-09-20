@@ -16,9 +16,10 @@ import org.springframework.stereotype.Component;
  *
  * <p><b>baseUrl</b>：{@code https://open.bigmodel.cn/api/paas/v4}（来自配置，不硬编码）
  * <br><b>认证</b>：{@code Authorization: Bearer {apiKey}}
- * <br><b>模型</b>：glm-4-plus（效果好、收费） / glm-4-flash（便宜甚至免费，开发默认） / glm-4-air
+ * <br><b>模型</b>：glm-4.5-flash（免费，<b>推理模型</b>，当前默认） / glm-4.7-flash（免费，推理模型，但实测严重过载）
+ * / glm-4-flash（免费，快，非推理） / glm-4-plus（效果好、收费） / glm-4-air
  *
- * <h3>三个必须记住的坑（都写在下面的实现里）</h3>
+ * <h3>四个必须记住的坑（都写在下面的实现里）</h3>
  * <ol>
  *   <li><b>{@code response_format} 要求 prompt 里出现 "json" 字样</b>，否则该参数不生效。
  *       基类的 {@code buildJsonSystemPrompt} 已保证这一点；这里的
@@ -28,6 +29,14 @@ import org.springframework.stereotype.Component;
  *       直接失败会让「要 JSON」这个能力在部分模型上完全不可用。</li>
  *   <li><b>流式最后一个 chunk 可能只带 usage 不带内容</b>，content 会是 null 或空串。
  *       基类解析时已容忍（空串不回调 delta），这里不必重复处理。</li>
+ *   <li><b>推理模型（glm-4.7-flash）的响应里有 {@code reasoning_content}</b>，
+ *       思维链在里面、{@code content} 只放最终答案（与 DeepSeek 的 deepseek-reasoner 同一形态）。
+ *       基类只读 {@code choices[0].message.content} 与流式的 {@code delta.content}，
+ *       所以思维链<b>结构性</b>被忽略，不会混进解析结果 —— 不需要额外过滤代码。
+ *       但要留意两点：思维链<b>计入 completion_tokens</b>（成本统计因此是真实的、偏高的），
+ *       且<b>占用 max-tokens 额度</b> —— 长输出阶段若思维链吃满额度，
+ *       会得到 {@code finish_reason=length} 且 content 为空，表现为「模型什么都没返回」。
+ *       实测 glm-4.7-flash 做一次意图解析：918 输出 token 中 871 是思维链，耗时约 13 秒。</li>
  * </ol>
  */
 @Component

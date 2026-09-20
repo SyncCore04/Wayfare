@@ -130,18 +130,36 @@ springdoc:
 # P0-A 尚无对应实体类，Spring 会忽略未知键，不影响启动。
 # =====================================================================
 
-# ---------- 大模型：只支持 GLM（智谱）与 DeepSeek，均走 OpenAI 兼容协议 ----------
+# ---------- 大模型：GLM（智谱） / DeepSeek / Qwen（阿里百炼），均走 OpenAI 兼容协议 ----------
 llm:
   enabled: true
-  # L2 的 sys_config 优先于此
-  active-provider: glm
-  fallback-order: glm,deepseek
+  # L2 的 sys_config 优先于此（注意：改这里不够，sys_config 里有值会盖过它）
+  #
+  # 主力 = qwen3.8-flash。选它的理由（2026-09-20 同 prompt 实测）：
+  #   · 它能把「周末」正确推算成最近的周六（2026-09-26）—— GLM 的 flash 一直算错（给成周四）；
+  #   · 热起来 9~14 秒，而 glm-4.5-flash 要 70 秒（撞 90 秒超时）；
+  #   · 免费档可用的模型里，它是唯一同时满足「算得对」与「装得进超时」的。
+  # 降级链 = qwen → glm → deepseek：三家不同厂商，任一家过载/挂掉都能自动切换。
+  # （在此之前链上实际只有 GLM 一家可用，因为 DeepSeek 未配 Key —— 等于没有降级。）
+  active-provider: qwen
+  fallback-order: qwen,glm,deepseek
   timeout-ms: 90000
   providers:
+    qwen:
+      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      api-key: "${QWEN_API_KEY:}"
+      # ⚠️ 百炼的模型名**大小写敏感**：必须是全小写 qwen3.8-flash；
+      #    写成 qwen3.8-Flash 会报 model_not_found（文案像没权限，其实是名字不对）。
+      #    这个端点还聚合了 glm-5.3 / deepseek-v4-flash / kimi 等，换模型改这一行即可。
+      model: qwen3.8-flash
+      temperature: 0.3
+      max-tokens: 4096
     glm:
       base-url: https://open.bigmodel.cn/api/paas/v4
       api-key: "${GLM_API_KEY:}"
-      # 开发调试用 flash（几乎不花钱），最终演示换 glm-4-plus
+      # 作为**降级备胎**选 glm-4-flash：备胎要的是快和稳（3/3 可用、约 4~15 秒），不是推理强。
+      # glm-4.5-flash 推理更强但单次要 70 秒，当备胎会把用户等待拉长到不可接受。
+      # 它是非推理模型，响应里没有 reasoning_content。
       model: glm-4-flash
       temperature: 0.3
       max-tokens: 4096

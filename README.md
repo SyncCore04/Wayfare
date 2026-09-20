@@ -14,7 +14,7 @@ Wayfare 把这两个问题当成架构问题来解决：
 
 - **大模型只做语义决策**（分天、选点、写讲解），**坐标、距离、时长只来自地图 API**，拿不到就明确标记 `ESTIMATED`——绝不让模型编一个"距离 3.2 公里"。
 - **连接器可插拔，任一时刻系统完整可用**：地图被管理员整体关闭后，全流程自动切换到估算模式继续跑，界面上只是角标从绿（实测）变成橙（估算）——这是**能力降级，不是功能降级**。
-- **大模型可热切换**：智谱 GLM 与 DeepSeek 双厂商走同一套 OpenAI 兼容协议，改一条数据库配置即完成切换，无需重启；全部不可用时回落离线 Mock，链路照样演示。
+- **大模型可热切换**：Qwen（阿里百炼）/ 智谱 GLM / DeepSeek 三家走同一套 OpenAI 兼容协议，改一条数据库配置即完成切换，无需重启；主力过载时按序自动降级，全部不可用时回落离线 Mock，链路照样演示。
 
 一句话概括设计哲学：**模型只是强大的引擎，变速箱和离合器得自己调——这个项目调的就是那套变速箱。**
 
@@ -52,7 +52,7 @@ L3 降级         熔断器 + 分级 Provider  主力挂了切备用，全挂了
 
 ### 3. 统一出站治理
 
-所有外部 HTTP 调用（GLM / DeepSeek / 百度地图）走同一个治理封装：
+所有外部 HTTP 调用（Qwen / GLM / DeepSeek / 百度地图）走同一个治理封装：
 
 - **重试**：仅 GET 重试（指数退避），POST 一律不重试——重复调用可能产生费用；4xx 除 429 外不重试——客户端错误重试无意义。
 - **日志**：每次尝试落一条 `external_call_log`（连接器、接口、耗时、成败、脱敏后的请求摘要），是成本统计与监控看板的数据源。
@@ -71,8 +71,8 @@ L3 降级         熔断器 + 分级 Provider  主力挂了切备用，全挂了
 |---|---|---|
 | 后端 | Spring Boot 3.3.5 / JDK 17 / MyBatis-Plus 3.5.7 | 纯 Spring MVC，不引 WebFlux |
 | 鉴权 | jjwt 0.12.6 + 自建拦截器 | 刻意不引 Spring Security 全家桶 |
-| 数据 | MySQL 8.0 / Redis 7 | 17 张表（内容域 + 行程域） |
-| 大模型 | 智谱 GLM / DeepSeek / Mock | OpenAI 兼容协议，公共逻辑收敛在抽象基类 |
+| 数据 | MySQL 8.0 / Redis 7 | 22 张表（内容域 14 + 行程治理域 8） |
+| 大模型 | 阿里百炼 Qwen / 智谱 GLM / DeepSeek / Mock | OpenAI 兼容协议，公共逻辑收敛在抽象基类 |
 | 地图 | 百度地图 Web 服务 | 可整体关闭，关闭后全流程估算 |
 | 前端 | Vue 3.4 / Vite 5 / Element Plus 2.6 / Pinia | 纯 JavaScript，无 TypeScript |
 | 文档 | springdoc-openapi (Swagger UI) | 启动即可访问 |
@@ -89,7 +89,7 @@ mysql -u root -p < db/schema-trip.sql
 # 3. 配置密钥与数据库密码（本文件已被 gitignore，仓库内只有 .example 模板）
 cd wayfare-backend
 copy .env.properties.example .env.properties
-#   编辑 .env.properties，填入 MYSQL_ROOT_PASSWORD 与 GLM_API_KEY
+#   编辑 .env.properties，填入 MYSQL_ROOT_PASSWORD 与 QWEN_API_KEY（或 GLM_API_KEY）
 
 # 4. 启动后端（8080，context-path /api）
 mvn spring-boot:run
@@ -101,7 +101,7 @@ npm install
 npm run dev
 ```
 
-> 没有任何大模型 Key？不需要申请也能跑：双厂商都未配置时自动回落离线 Mock，
+> 没有任何大模型 Key？不需要申请也能跑：三家都未配置时自动回落离线 Mock，
 > 全链路（含前端流式渲染）照常可演示，只是内容由 Mock 生成。
 
 - 健康检查：`GET http://localhost:8080/api/health`
@@ -117,26 +117,40 @@ Wayfare/
 │   └── schema-trip.sql     行程域与治理域 8 张表（运行时开关/POI 缓存/调用日志/
 │                           偏好画像/行程三表/AI 生成日志）
 ├── wayfare-backend/
-│   └── src/main/java/com/wayfare/
-│       ├── common/         统一返回、全局异常、配置、脱敏工具
-│       ├── connector/
-│       │   ├── llm/        大模型连接器（glm/deepseek/mock + 决策器）
-│       │   ├── map/        地图连接器（baidu/cache/disabled + 三级降级）
-│       │   └── governance/ 出站治理（重试/熔断/日志/脱敏）
-│       ├── controller/     REST 接口（内容域 + 社交域 + 偏好 + 诊断）
-│       ├── entity|mapper/  22 张表的实体与 Mapper
-│       ├── profile/        用户画像渲染器（渲染成注入 prompt 的中文文本块）
-│       ├── trip/           行程域：错误码枚举、阶段记录（编排管线 P3 落地于此）
-│       └── security/       JWT 拦截器、Token 黑名单、用户上下文
+│   └── src/main/
+│       ├── java/com/wayfare/
+│       │   ├── common/         统一返回、全局异常、配置、脱敏工具
+│       │   ├── connector/
+│       │   │   ├── llm/        大模型连接器（qwen / glm / deepseek / mock + 决策器）
+│       │   │   ├── map/        地图连接器（baidu / cache / disabled + 三级降级）
+│       │   │   └── governance/ 出站治理（重试 / 熔断 / 日志 / 脱敏）
+│       │   ├── controller/     REST 接口（内容域 + 社交域 + 偏好 + 诊断）
+│       │   ├── dto/            请求与管线数据结构（IntentDTO / CandidateDTO …）
+│       │   ├── entity|mapper/  22 张表的实体与 Mapper
+│       │   ├── profile/        用户画像渲染器（渲染成注入 prompt 的中文文本块）
+│       │   ├── trip/           编排管线：意图解析（Step 1）、候选检索（Step 2）、错误码、阶段记录
+│       │   └── security/       JWT 拦截器、Token 黑名单、用户上下文
+│       └── resources/
+│           └── map-preference-tag.json   偏好 → 地图检索词字典（可维护，改词不用改代码）
 └── wayfare-frontend/
     └── src/{api,stores,router,layouts,components,views}/
 ```
 
 ## 工程实践
 
-- **测试**：53 个单元 / 集成测试全绿，覆盖脱敏规则（6）、出站重试与降级策略（9）、
+- **测试**：105 个单元 / 集成测试全绿（另有 4 个真实调用大模型与地图的验收测试默认跳过，
+  用 `-Dwayfare.live=true` 显式开启），覆盖脱敏规则（6）、出站重试与降级策略（13）、
   用户画像渲染规则（11）、画像读写与 upsert 的 null 语义（7）、行程表族排序与数据诚信字段（5）、
-  AI 日志聚合与成本计算（11）、实体与表结构映射（4）。
+  AI 日志聚合与成本计算（11）、实体与表结构映射（4）、
+  **意图解析的 Schema 校验与失败重试（24）**、
+  **候选检索的去重 / 忌口过滤 / 坐标诚信 / 候选不足降级 / 配额保护（24）**。
+- **连接器是"实测驱动"的，不是照文档抄的**：地图与大模型的每个参数都拿真实 Key 逐组打过，
+  踩到的坑全部写进代码注释与配置说明。两个例子：
+  百度 `place/v2/search` 的 `tag` 参数**填错不报错、只会静默返回垃圾** —— 实测 `tag=风景名胜` 时
+  结果从真实 POI（方山国家森林公园、冷泉寺）变成「广州市/邵阳市」这类城市级噪声，
+  **这比报错危险得多，因为它不引起任何告警**，所以本项目只用 `query`；
+  免费额度下「地点检索」只有 100 次/天、并发 3 QPS，因此加了**请求间隔 + 早停 + 检索词收敛**，
+  一轮完整验收从约 40 次调用降到 **9 次**，且候选质量反而更好（村名噪声消失）。
 - **AI 辅助开发的工程化**：本项目使用"任务块"方式驱动 AI 编码——每个任务块有独立的目标、交付物与验收标准，AI 读完复述确认后才动手，跑通一块再投喂下一块。全套实施手册与设计文档暂未开源，需要的可以通过 issue 联系我。
 - **命名纪律**：仓库内不允许出现旧项目残留（`photoshare` / `photo-share`），验收时以 grep 结果为零为准。
 
@@ -145,9 +159,9 @@ Wayfare/
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | P0 | 仓库骨架 / 内容域 / 鉴权 / 前台页面 | ✅ 已完成 |
-| P1 | 双厂商大模型 / 地图连接器 / 出站治理 / 诊断接口 | ✅ 已完成 |
+| P1 | 大模型连接器（GLM + DeepSeek，后扩展 Qwen）/ 地图连接器 / 出站治理 / 诊断接口 | ✅ 已完成 |
 | P2 | 偏好画像 / 行程表族 / 日志缓存 | ✅ 已完成 |
-| P3 | 七步 AI 行程编排管线（核心） | ⏳ 规划中 |
+| P3 | 七步 AI 行程编排管线（核心） | 🔨 进行中（Step 1 意图解析、Step 2 候选检索已完成） |
 | P4 | SSE 流式输出 / 成本控制 | ⏳ 规划中 |
 | P5 | 前端偏好中心 / AI 规划交互 | ⏳ 规划中 |
 | P6-P8 | 后台管理 / 测试指标 / 部署 | ⏳ 规划中 |

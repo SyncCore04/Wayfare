@@ -85,7 +85,7 @@ class GovernedExternalHttpClientTest {
     }
 
     @Test
-    @DisplayName("验收3：POST 失败**不重试**，只留 1 条日志")
+    @DisplayName("验收3：POST 失败**不重试**，只留 1 条日志（超时场景；429 是唯一例外，见后）")
     void postIsNeverRetried() {
         when(transport.postJson(anyString(), anyMap(), anyString(), anyInt()))
                 .thenThrow(ExternalHttpException.noResponse("timeout", true, new IOException("timeout")));
@@ -129,6 +129,66 @@ class GovernedExternalHttpClientTest {
         assertNotNull(result);
         verify(transport, times(2)).getJson(anyString(), anyMap(), anyInt());
         assertEquals(2, logService.records.size());
+    }
+
+    @Test
+    @DisplayName("POST + 429：重试后成功（429 = 请求被拒、未产生费用，重试是安全的）")
+    void postRetriesOnRateLimitAndSucceeds() {
+        when(transport.postJson(anyString(), anyMap(), anyString(), anyInt()))
+                .thenThrow(ExternalHttpException.ofStatus(429, "{\"error\":{\"code\":\"1305\"}}"))
+                .thenReturn("{\"choices\":[{\"message\":{\"content\":\"{}\"}}]}");
+
+        String result = client.postJson("https://open.bigmodel.cn/api/paas/v4/chat/completions",
+                Map.of(), "{\"model\":\"glm-4.5-flash\"}", 90000);
+
+        assertNotNull(result);
+        verify(transport, times(2)).postJson(anyString(), anyMap(), anyString(), anyInt());
+        assertEquals(2, logService.records.size(), "两次尝试各留一条日志");
+        assertFalse(logService.records.get(0).success());
+        assertTrue(logService.records.get(1).success());
+    }
+
+    @Test
+    @DisplayName("POST + 429 连续两次：重试到上限后仍失败 → 共 3 次尝试、3 条日志")
+    void postRateLimitRetriesUpToMaxThenFails() {
+        when(transport.postJson(anyString(), anyMap(), anyString(), anyInt()))
+                .thenThrow(ExternalHttpException.ofStatus(429, "too many requests"));
+
+        ExternalHttpException ex = assertThrows(ExternalHttpException.class,
+                () -> client.postJson("https://open.bigmodel.cn/api/paas/v4/chat/completions",
+                        Map.of(), "{\"model\":\"glm-4.5-flash\"}", 90000));
+
+        assertEquals(429, ex.getStatus());
+        verify(transport, times(3)).postJson(anyString(), anyMap(), anyString(), anyInt());
+        assertEquals(3, logService.records.size());
+    }
+
+    @Test
+    @DisplayName("POST + 401：不重试 —— 认证错误重试只会再错一次")
+    void postAuthErrorIsNotRetried() {
+        when(transport.postJson(anyString(), anyMap(), anyString(), anyInt()))
+                .thenThrow(ExternalHttpException.ofStatus(401, "unauthorized"));
+
+        assertThrows(ExternalHttpException.class,
+                () -> client.postJson("https://open.bigmodel.cn/api/paas/v4/chat/completions",
+                        Map.of(), "{}", 90000));
+
+        verify(transport, times(1)).postJson(anyString(), anyMap(), anyString(), anyInt());
+        assertEquals(1, logService.records.size());
+    }
+
+    @Test
+    @DisplayName("POST + 超时：不重试 —— 无法确定请求是否已被处理，重试可能重复扣费")
+    void postTimeoutIsNotRetried() {
+        when(transport.postJson(anyString(), anyMap(), anyString(), anyInt()))
+                .thenThrow(ExternalHttpException.noResponse("timeout", true, new IOException("timeout")));
+
+        assertThrows(ExternalHttpException.class,
+                () -> client.postJson("https://open.bigmodel.cn/api/paas/v4/chat/completions",
+                        Map.of(), "{}", 90000));
+
+        verify(transport, times(1)).postJson(anyString(), anyMap(), anyString(), anyInt());
+        assertEquals(1, logService.records.size());
     }
 
     @Test

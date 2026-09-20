@@ -133,8 +133,8 @@ CREATE TABLE external_call_log (
 -- ---------- 组 llm：大模型相关开关 ----------
 INSERT INTO sys_config (config_key, config_value, value_type, group_name, description, updated_by) VALUES
 ('llm.enabled',         'true',          'BOOL',   'llm', '是否启用大模型能力。关闭后 AI 规划入口不可用', 0),
-('llm.active-provider', 'glm',           'STRING', 'llm', '当前使用厂商：glm | deepseek | mock', 0),
-('llm.fallback-order',  'glm,deepseek',  'STRING', 'llm', '降级顺序，逗号分隔。主力不可用时按序切换', 0),
+('llm.active-provider', 'qwen',          'STRING', 'llm', '当前使用厂商：qwen | glm | deepseek | mock', 0),
+('llm.fallback-order',  'qwen,glm,deepseek', 'STRING', 'llm', '降级顺序，逗号分隔。主力不可用时按序切换', 0),
 ('llm.timeout-ms',      '90000',         'INT',    'llm', '单次调用超时（毫秒）。行程编排是长输出，默认 90 秒', 0),
 -- 【单价留 0 是有意的】单位「元/百万 token」，需按厂商官网实际报价填写。
 -- 0 表示「未配置」：此时 AiLogService.estCost 返回 null 而不是 0 ——

@@ -36,6 +36,10 @@ public enum ResultCode {
     LLM_BAD_REQUEST(2106, "大模型请求参数被拒绝"),
     LLM_PARSE_ERROR(2107, "大模型响应解析失败"),
     LLM_DISABLED(2108, "大模型能力已被关闭"),
+    // ---- 管线（P3）----
+    // 与 AiErrorCode.SCHEMA_INVALID 是「一个场景两个视角」的关系：
+    // 本码给用户看（提示换个说法重试），AiErrorCode 写进 ai_generation_log 给运维归因。
+    SCHEMA_INVALID(2109, "没能理解你的行程需求，请换个说法再试一次"),
     // ---- 地图连接器 ----
     // 百度的失败原因（AK 错 / 配额耗尽 / 参数非法）语义差别很大，必须分开：
     // AK 错要管理员动手、配额耗尽要等或换 Key、参数非法是我们自己的 bug。

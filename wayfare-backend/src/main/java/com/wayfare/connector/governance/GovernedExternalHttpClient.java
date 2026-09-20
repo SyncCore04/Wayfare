@@ -22,8 +22,10 @@ import java.util.function.Consumer;
  * <ul>
  *   <li><b>仅 GET 重试，最多 2 次，退避 200ms / 600ms（指数）</b> ——
  *       GET 是幂等的，重试不会产生副作用；退避而非立刻重试，是为了给对端一点恢复时间。</li>
- *   <li><b>POST 一律不重试</b> —— 大模型与部分地图接口的 POST 可能产生费用或副作用，
- *       重复执行等于重复扣费/重复下单。这条是硬约束，不因为成功率而放宽。</li>
+ *   <li><b>POST 默认不重试，唯一例外是 HTTP 429</b> —— 大模型与部分地图接口的 POST 可能产生费用或副作用，
+ *       重复执行等于重复扣费/重复下单。但 <b>429 是「对端主动拒绝、请求根本没被处理」</b>：
+ *       没有 token 消耗、没有费用、没有副作用，重试它是安全的
+ *       （详见 {@link #executeWithRetryOnRateLimit}）。其余任何 POST 失败（含超时）一律不重试。</li>
  *   <li><b>跳过 4xx（429 除外）</b> —— 401/403/400 这类是「请求本身不对」，
  *       重试只会得到同样的错误，白等两次退避还污染日志。
  *       唯独 429（限流）值得等一会儿再试。</li>
@@ -32,7 +34,7 @@ import java.util.function.Consumer;
  *
  * <h3>日志</h3>
  * 每次尝试都落一条 {@code external_call_log}，所以「GET 首次失败第二次成功」会留下 2 条记录，
- * 而「POST 失败」只有 1 条 —— 这是手册验收第 2、3 条的判定依据。
+ * 而「POST 非 429 失败」只有 1 条 —— 这是手册验收第 2、3 条的判定依据。
  * <b>记录前一律过 {@link MaskUtil} 脱敏</b>，库里不允许出现完整密钥。
  */
 @Component
@@ -44,8 +46,18 @@ public class GovernedExternalHttpClient implements ExternalHttpClient {
     /** 最多重试次数（不含首次） */
     private static final int MAX_RETRIES = 2;
 
-    /** 退避表：第 1 次重试等 200ms，第 2 次等 600ms */
+    /** 退避表（GET 用）：第 1 次重试等 200ms，第 2 次等 600ms */
     private static final long[] BACKOFF_MS = {200L, 600L};
+
+    /**
+     * 限流退避表（POST 的 429 专用）：第 1 次等 1s，第 2 次等 3s。
+     *
+     * <p><b>为什么比 GET 的退避长这么多</b>：429 表示对端已经过载，
+     * 隔 200ms 再打过去基本还是 429 —— 实测免费大模型在百毫秒级退避下几乎必然连续失败，
+     * 那样的重试只是把「1 次失败」变成「3 次失败」，白白拉长用户等待。
+     * 限流要等出量级差才有意义。
+     */
+    private static final long[] RATE_LIMIT_BACKOFF_MS = {1000L, 3000L};
 
     private final SimpleExternalHttpClient transport;
     private final ExternalCallLogService callLogService;
@@ -63,8 +75,8 @@ public class GovernedExternalHttpClient implements ExternalHttpClient {
 
     @Override
     public String postJson(String url, Map<String, String> headers, String jsonBody, int timeoutMs) {
-        // retryable = false：POST 不自动重试（见类注释）
-        return doExecute("POST", url, headers, jsonBody, timeoutMs);
+        // 只对 429 重试，其余失败一律不重试（见类注释与 executeWithRetryOnRateLimit）
+        return executeWithRetryOnRateLimit("POST", url, headers, jsonBody, timeoutMs);
     }
 
     @Override
@@ -105,6 +117,53 @@ public class GovernedExternalHttpClient implements ExternalHttpClient {
                 attempt++;
             }
         }
+    }
+
+    /**
+     * POST 专用的窄口径重试：<b>只对 HTTP 429 重试</b>，其余任何失败一律不重试。
+     *
+     * <p><b>为什么这条不与「POST 不重试」冲突</b>：那条规则的理由是
+     * 「重复执行等于重复扣费/重复下单」—— 说的是<b>请求已经被处理</b>的情形。
+     * 而 429 是<b>对端主动拒绝、请求根本没被处理</b>：没有 token 消耗、没有费用、没有副作用。
+     * 「重试一个被拒绝的请求」与「重试一个已执行的请求」风险完全不同，不能混为一谈。
+     *
+     * <p>类注释里「跳过 4xx（429 除外）」本来就已经表达了这层意图 ——
+     * 原先的实现只是被「POST 直接走 doExecute、不进重试循环」这条更粗的规则盖住了。
+     * 本方法把 429 这个例外补完整。
+     *
+     * <p><b>这不是可有可无的优化</b>：免费大模型过载时<b>只返回 429</b>
+     * （实测 GLM 返回业务码 1305 → HTTP 429），而系统的降级链是<b>厂商粒度</b>
+     * （glm/deepseek/mock），同一厂商换个模型不算降级 —— 所以没有这条重试，
+     * 「选了个过载的免费模型」就等于「每次调用直接失败」。重试是唯一的自救手段。
+     *
+     * <p>流式（{@link #postJsonStream}）仍然完全不重试：内容已经往外推了，
+     * 换个连接重来会产生重复内容，那是比失败更糟的结果。
+     */
+    private String executeWithRetryOnRateLimit(String method, String url, Map<String, String> headers,
+                                               String body, int timeoutMs) {
+        int attempt = 0;
+        while (true) {
+            try {
+                return doExecute(method, url, headers, body, timeoutMs);
+            } catch (ExternalHttpException e) {
+                if (attempt >= MAX_RETRIES || !isRateLimited(e)) {
+                    throw e;
+                }
+                long backoff = RATE_LIMIT_BACKOFF_MS[Math.min(attempt, RATE_LIMIT_BACKOFF_MS.length - 1)];
+                log.warn("POST 被限流（HTTP 429），将重试（第 {} 次，退避 {}ms）: {}",
+                        attempt + 1, backoff, MaskUtil.maskUrlSecrets(url));
+                sleepQuietly(backoff);
+                attempt++;
+            }
+        }
+    }
+
+    /**
+     * 是否被限流（429）。<b>只有它值得对 POST 重试</b> —— 理由见 {@link #executeWithRetryOnRateLimit}。
+     * 注意「没拿到响应」（超时/连接失败）对 POST 返回 false：那类无法确定请求是否已被处理，不能重试。
+     */
+    private boolean isRateLimited(ExternalHttpException e) {
+        return e.hasResponse() && e.getStatus() == 429;
     }
 
     /** 真正发一次请求并记一条日志 */
