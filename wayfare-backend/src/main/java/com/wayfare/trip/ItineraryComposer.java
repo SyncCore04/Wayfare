@@ -90,6 +90,21 @@ public class ItineraryComposer {
     public ComposeResult compose(IntentDTO intent, CandidatePool pool, PreOrderResult preOrder,
                                  UserTravelProfile profile, ProfileOverrides overrides,
                                  ResolvedMap capability) {
+        return compose(intent, pool, preOrder, profile, overrides, capability, null);
+    }
+
+    /**
+     * 编排行程（带重排反馈）。
+     *
+     * @param replanFeedback P3-E 的约束校验失败后，把违规项拼成的一段反馈文本；
+     *                       非空时会附加在 user prompt 里，让模型「按这些问题改一版」。
+     *                       为 null 表示这是首次编排。
+     *                       与 {@code violations}（Schema 校验失败的回喂）是两回事：
+     *                       那个是「格式不对」，这个是「格式对但内容违反了约束」。
+     */
+    public ComposeResult compose(IntentDTO intent, CandidatePool pool, PreOrderResult preOrder,
+                                 UserTravelProfile profile, ProfileOverrides overrides,
+                                 ResolvedMap capability, String replanFeedback) {
         if (intent == null || intent.getDays() == null) {
             // 天数没解析出来就没法分天 —— 这是 P3-A 的 needConfirm 该拦住的情况，
             // 走到这里说明上游漏判了，如实返回失败而不是硬编一个天数
@@ -109,6 +124,11 @@ public class ItineraryComposer {
         boolean mapClosed = capability == null || capability.mode() == MapMode.ESTIMATED;
         String systemPrompt = buildSystemPrompt(intent, profile, overrides, mapClosed);
         String baseUserPrompt = buildUserPrompt(intent, ordered, mapClosed);
+        if (StringUtils.hasText(replanFeedback)) {
+            // 重排：把上一版的违规项附在 user prompt 里。放在 system 之后、正文之前，
+            // 是因为它属于「这一次的具体要求」，不是「一直生效的规则」
+            baseUserPrompt = baseUserPrompt + "\n\n" + replanFeedback;
+        }
 
         long startMs = System.currentTimeMillis();
         List<LlmUsage> usages = new ArrayList<>();

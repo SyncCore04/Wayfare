@@ -649,7 +649,9 @@ public class CandidateSearcher {
                                      IntentDTO intent, int maxCandidate) {
         List<CandidateDTO> result = new ArrayList<>();
         LinkedHashSet<String> seenUid = new LinkedHashSet<>();
-        List<String> tabooTerms = tabooTerms(profile, intent);
+        // 忌口词与 P3-E 用同一套归一化（TabooMatcher）—— 两边各写一份迟早会跑偏，
+        // 而「漏过忌口」是安全问题，不是体验问题
+        List<String> tabooTerms = TabooMatcher.collect(profile, intent);
 
         for (CandidateDTO candidate : raw) {
             if (candidate == null || !StringUtils.hasText(candidate.getName())) {
@@ -659,7 +661,7 @@ public class CandidateSearcher {
             // ⚠️ **刻意不判 isFood()**：放宽检索时用的宽泛关键词（「景点」「公园」）同样会把
             // 餐饮点搜出来，而那时它会被打成 SCENIC —— 只看类型就会漏掉它。
             // 忌口是硬约束（"多剔一个只是少一个点，漏剔一个是安全问题"），所以按名字一律过滤。
-            if (hitsTaboo(candidate.getName(), tabooTerms)) {
+            if (TabooMatcher.hits(candidate.getName(), tabooTerms)) {
                 log.debug("剔除含忌口的点：{}（命中 {}）", candidate.getName(), tabooTerms);
                 continue;
             }
@@ -702,67 +704,18 @@ public class CandidateSearcher {
         return false;
     }
 
-    /** 归一化：去括号内容、去空白、全角转半角、统一小写 */
-    private String normalizeName(String name) {
-        if (name == null) return "";
-        String text = name.replaceAll("[（(].*?[)）]", "");
-        StringBuilder sb = new StringBuilder();
-        for (char c : text.toCharArray()) {
-            if (Character.isWhitespace(c)) continue;
-            if (c >= 'Ａ' && c <= 'Ｚ') {
-                sb.append((char) (c - 'Ａ' + 'a'));
-            } else if (c >= '０' && c <= '９') {
-                sb.append((char) (c - '０' + '0'));
-            } else {
-                sb.append(Character.toLowerCase(c));
-            }
-        }
-        return sb.toString();
-    }
-
     /**
-     * 汇总忌口词。
+     * 归一化：<b>先去掉括号内容</b>，再做通用归一化（去空白、全角转半角、统一小写）。
      *
-     * <p>两个来源：长期画像的 {@code taboos} + 本次的 {@code dietaryOverrides}。
-     * 本次忌口常带口语前缀（「不吃辣」「海鲜过敏」），必须归一化成核心词（「辣」「海鲜」），
-     * 否则 {@code name.contains("不吃辣")} 永远匹配不上任何餐厅名。
+     * <p>通用部分委托给 {@link TabooMatcher#normalize} —— 与忌口匹配共用同一套规则，
+     * 避免「去重时认为两个名字相同、忌口匹配时却认为不同」这种自相矛盾。
+     * 去括号是本方法特有的：「寿阳文庙」与「寿阳文庙(正门)」应当算同一个点。
      */
-    private List<String> tabooTerms(UserTravelProfile profile, IntentDTO intent) {
-        LinkedHashSet<String> terms = new LinkedHashSet<>();
-        if (profile != null && StringUtils.hasText(profile.getTaboos())) {
-            for (String part : profile.getTaboos().split("[,，]")) {
-                addTabooTerm(terms, part);
-            }
+    private String normalizeName(String name) {
+        if (name == null) {
+            return "";
         }
-        for (String part : safeList(intent.getDietaryOverrides())) {
-            addTabooTerm(terms, part);
-        }
-        return new ArrayList<>(terms);
-    }
-
-    private void addTabooTerm(LinkedHashSet<String> terms, String raw) {
-        if (!StringUtils.hasText(raw)) return;
-        String term = raw.trim();
-        for (String noise : List.of("过敏", "不能吃", "不可以吃", "不吃", "忌口", "忌", "免", "别吃", "少放", "不要")) {
-            term = term.replace(noise, "");
-        }
-        term = term.trim();
-        if (term.length() >= 1) {
-            terms.add(term);
-        }
-    }
-
-    private boolean hitsTaboo(String name, List<String> tabooTerms) {
-        if (!StringUtils.hasText(name) || tabooTerms.isEmpty()) {
-            return false;
-        }
-        String normalized = normalizeName(name);
-        for (String term : tabooTerms) {
-            if (normalized.contains(normalizeName(term))) {
-                return true;
-            }
-        }
-        return false;
+        return TabooMatcher.normalize(name.replaceAll("[（(].*?[)）]", ""));
     }
 
     // ==================== shortage 判定 ====================
