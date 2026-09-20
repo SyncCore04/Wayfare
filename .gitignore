@@ -51,6 +51,9 @@ yarn-error.log*
 
 # ===== AI 工作区内部文件（个人记忆/笔记，不属于项目代码）=====
 .workbuddy/
+# AI 助手在 WorkBuddy worktree 下写的记忆目录（与 .workbuddy/ 不同名，必须单独忽略，
+# 否则里面记的本机路径等信息会被 git add -A 带进仓库）
+.workbuddy-ai/
 
 # ===== Runtime uploads =====
 wayfare-backend/uploads/

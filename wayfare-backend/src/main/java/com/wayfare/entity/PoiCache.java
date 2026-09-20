@@ -22,12 +22,23 @@ import java.time.LocalDateTime;
  *
  * <p>注意：本表的建表语句目前放在 {@code db/schema-trip.sql} 的 P1-C 段落里
  * （P1-C 需要它才能验证缓存降级），P2-B 会把行程表族追加到同一个文件。
+ *
+ * <p><b>P2-C 补了 4 列：{@code provider} / {@code keyword} / {@code fetchedAt} /
+ * {@code expiresAt}。</b>它们目前<b>已建好但暂未写入，写入属 P3（候选检索阶段）</b>。
+ * P1-C 的 {@code BaiduMapProvider} 已经在回写本表，但 P2 阶段的纪律是「纯数据层，
+ * 不写业务逻辑」，所以没有去动连接器代码；P3 的候选检索在写缓存时天然知道
+ * 检索词与 TTL，届时一并写入即可。
+ * <b>不写也不会出问题</b>：{@code LocalCacheMapProvider} 目前按 city + name/tag
+ * 模糊匹配读取，完全不依赖这 4 列，它们为 null 时缓存降级照常工作。
  */
 @TableName("poi_cache")
 public class PoiCache implements Serializable {
 
     @TableId(type = IdType.AUTO)
     private Long id;
+
+    /** 数据来源厂商 baidu（P2-C 新增，待 P3 写入） */
+    private String provider;
 
     /** 百度 POI 唯一 ID */
     private String poiUid;
@@ -37,6 +48,9 @@ public class PoiCache implements Serializable {
 
     /** 所属城市，检索缓存时按它过滤 */
     private String city;
+
+    /** 产生这条缓存时的检索词（P2-C 新增，待 P3 写入） */
+    private String keyword;
 
     /** 经度（BD-09） */
     private Double lng;
@@ -56,11 +70,19 @@ public class PoiCache implements Serializable {
     /** 原始响应片段，便于排查字段缺失的原因 */
     private String rawJson;
 
+    /** 本次从地图抓取的时间（P2-C 新增，待 P3 写入） */
+    private LocalDateTime fetchedAt;
+
+    /** 过期时间 = fetchedAt + {@code trip.poi-cache-ttl-hours}（P2-C 新增，待 P3 写入） */
+    private LocalDateTime expiresAt;
+
     @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedAt;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
+    public String getProvider() { return provider; }
+    public void setProvider(String provider) { this.provider = provider; }
     public String getPoiUid() { return poiUid; }
     public void setPoiUid(String poiUid) { this.poiUid = poiUid; }
     public String getName() { return name; }
@@ -69,6 +91,8 @@ public class PoiCache implements Serializable {
     public void setAddress(String address) { this.address = address; }
     public String getCity() { return city; }
     public void setCity(String city) { this.city = city; }
+    public String getKeyword() { return keyword; }
+    public void setKeyword(String keyword) { this.keyword = keyword; }
     public Double getLng() { return lng; }
     public void setLng(Double lng) { this.lng = lng; }
     public Double getLat() { return lat; }
@@ -83,6 +107,10 @@ public class PoiCache implements Serializable {
     public void setTicketPrice(Double ticketPrice) { this.ticketPrice = ticketPrice; }
     public String getRawJson() { return rawJson; }
     public void setRawJson(String rawJson) { this.rawJson = rawJson; }
+    public LocalDateTime getFetchedAt() { return fetchedAt; }
+    public void setFetchedAt(LocalDateTime fetchedAt) { this.fetchedAt = fetchedAt; }
+    public LocalDateTime getExpiresAt() { return expiresAt; }
+    public void setExpiresAt(LocalDateTime expiresAt) { this.expiresAt = expiresAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

@@ -35,6 +35,15 @@ class GovernedExternalHttpClientTest {
         public void record(ExternalCallRecord record) {
             records.add(record);
         }
+
+        /**
+         * P1-E 给接口加了 stats(connector)（诊断接口用），这里只需满足接口契约。
+         * 本测试验的是「重试次数」与「日志条数」，不关心统计，返回空 map 即可。
+         */
+        @Override
+        public Map<String, Object> stats(String connector) {
+            return Map.of();
+        }
     }
 
     private SimpleExternalHttpClient transport;
@@ -139,8 +148,18 @@ class GovernedExternalHttpClientTest {
     @Test
     @DisplayName("补充：日志服务自身抛异常不能影响主流程")
     void logFailureDoesNotBreakCall() {
-        ExternalCallLogService broken = record -> {
-            throw new RuntimeException("表不存在");
+        // P1-E 之后 ExternalCallLogService 有两个抽象方法，不再是函数式接口，
+        // 所以这里必须用匿名类而不是 lambda
+        ExternalCallLogService broken = new ExternalCallLogService() {
+            @Override
+            public void record(ExternalCallRecord record) {
+                throw new RuntimeException("表不存在");
+            }
+
+            @Override
+            public Map<String, Object> stats(String connector) {
+                return Map.of();
+            }
         };
         GovernedExternalHttpClient c = new GovernedExternalHttpClient(transport, broken);
         when(transport.getJson(anyString(), anyMap(), anyInt())).thenReturn("{\"status\":0}");
