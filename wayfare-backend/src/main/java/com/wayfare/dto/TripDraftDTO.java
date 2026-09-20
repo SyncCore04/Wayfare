@@ -118,6 +118,58 @@ public class TripDraftDTO implements Serializable {
         public Integer getDurationSeconds() { return durationSeconds; }
         public void setDurationSeconds(Integer durationSeconds) { this.durationSeconds = durationSeconds; }
 
+        // ==================== P3-F · 事实补全后回填 ====================
+        // 下面这些字段在 P3-D 编排阶段（大模型输出）不受信任、解析时不写，
+        // 由 P3-F 的 Step6 enrichRoutes 从候选池 + 地图补全后回填，
+        // 使返回的 TripDraftDTO 每个条目都能自证「坐标/距离从哪来、可信到几分」，
+        // 满足「每一项都带 verifyStatus 与 dataSource」的交付要求。
+
+        /** 地图 POI 唯一标识；地图关闭时为空（P3-F 从候选池回填） */
+        private String poiUid;
+
+        /** 点位名称（P3-F 从候选池回填，供前端直接展示） */
+        private String poiName;
+
+        /** 地址（P3-F 从候选池回填，可能为空） */
+        private String address;
+
+        /** 经度(BD-09)；地图关闭时为空 */
+        private Double lng;
+
+        /** 纬度(BD-09)；地图关闭时为空 */
+        private Double lat;
+
+        /** 到下一站交通方式 DRIVE/PUBLIC/WALK/MIX（P3-F 回填，末站为空） */
+        private String transportModeToNext;
+
+        /** 可信度 VERIFIED/CACHED/ESTIMATED（数据诚信机制） */
+        private String verifyStatus;
+
+        /** 数据来源 BAIDU/LLM（数据诚信机制） */
+        private String dataSource;
+
+        /** 备注；估算模式下放「步行约十几分钟」这类模糊表述 */
+        private String note;
+
+        public String getPoiUid() { return poiUid; }
+        public void setPoiUid(String poiUid) { this.poiUid = poiUid; }
+        public String getPoiName() { return poiName; }
+        public void setPoiName(String poiName) { this.poiName = poiName; }
+        public String getAddress() { return address; }
+        public void setAddress(String address) { this.address = address; }
+        public Double getLng() { return lng; }
+        public void setLng(Double lng) { this.lng = lng; }
+        public Double getLat() { return lat; }
+        public void setLat(Double lat) { this.lat = lat; }
+        public String getTransportModeToNext() { return transportModeToNext; }
+        public void setTransportModeToNext(String transportModeToNext) { this.transportModeToNext = transportModeToNext; }
+        public String getVerifyStatus() { return verifyStatus; }
+        public void setVerifyStatus(String verifyStatus) { this.verifyStatus = verifyStatus; }
+        public String getDataSource() { return dataSource; }
+        public void setDataSource(String dataSource) { this.dataSource = dataSource; }
+        public String getNote() { return note; }
+        public void setNote(String note) { this.note = note; }
+
         /**
          * 是否餐饮。P3-E 的「每天至少 1 个 FOOD」靠它判。
          *

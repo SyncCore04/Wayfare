@@ -107,6 +107,16 @@ public class AiLogServiceImpl implements AiLogService {
     // ==================== 聚合 ====================
 
     @Override
+    public Map<String, Object> sumByUserSince(Long userId, LocalDateTime since, LocalDateTime to) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (userId == null || since == null || to == null) {
+            return result;
+        }
+        List<Map<String, Object>> rows = aiGenerationLogMapper.sumTokensGroupByProvider(userId, since, to);
+        return aggregateTokens(rows);
+    }
+
+    @Override
     public Map<String, Object> sumTokensByUserAndDate(Long userId, LocalDate date) {
         Map<String, Object> result = new LinkedHashMap<>();
         if (userId == null || date == null) {
@@ -116,7 +126,22 @@ public class AiLogServiceImpl implements AiLogService {
         LocalDateTime to = date.plusDays(1).atStartOfDay();
 
         List<Map<String, Object>> rows = aiGenerationLogMapper.sumTokensGroupByProvider(userId, from, to);
+        Map<String, Object> agg = aggregateTokens(rows);
 
+        result.put("date", date.toString());
+        result.putAll(agg);
+        result.put("byProvider", agg.get("byProvider"));
+        return result;
+    }
+
+    /**
+     * 把「按厂商分组的聚合行」加工成统一的 token/次数/成本 Map。
+     *
+     * <p>这是 {@link #sumTokensByUserAndDate} 与 {@link #sumByUserSince} 共用的核心，
+     * 抽出来避免两处口径漂移。
+     */
+    private Map<String, Object> aggregateTokens(List<Map<String, Object>> rows) {
+        Map<String, Object> result = new LinkedHashMap<>();
         List<Map<String, Object>> byProvider = new ArrayList<>();
         Long promptSum = null;
         Long completionSum = null;
@@ -131,7 +156,6 @@ public class AiLogServiceImpl implements AiLogService {
             Long totalTokens = toLong(row.get("totalTokens"));
             long callCount = toLongOrZero(row.get("callCount"));
 
-            // 单价按厂商取；未配置时 estCost 返回 null（不编造）
             BigDecimal providerCost = estCost(provider, totalTokens == null ? null : totalTokens.intValue());
 
             Map<String, Object> item = new LinkedHashMap<>();
@@ -152,13 +176,11 @@ public class AiLogServiceImpl implements AiLogService {
             }
         }
 
-        result.put("date", date.toString());
         result.put("promptTokens", promptSum);
         result.put("completionTokens", completionSum);
         result.put("totalTokens", totalSum);
         result.put("callCount", callCountSum);
-        // 只要有一家单价没配置，总额就不完整 —— 此时返回 null 而不是「部分之和」，
-        // 免得看起来像一个可信的总数
+        // 只要有一家单价没配置，总额就不完整 —— 返回 null 而非「部分之和」
         boolean allPricesConfigured = byProvider.stream()
                 .allMatch(item -> item.get("estCost") != null);
         result.put("estCost", byProvider.isEmpty() || !allPricesConfigured ? null : costSum);

@@ -5,6 +5,7 @@ import com.wayfare.trip.AiStageRecord;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -56,6 +57,21 @@ public interface AiLogService {
      *         <b>estCost 可能为 null</b>（单价未配置）—— 都不编造成 0。
      */
     Map<String, Object> sumTokensByUserAndDate(Long userId, LocalDate date);
+
+    /**
+     * 某用户某时间窗内的 token 合计与预估成本（P3-F 的 meta 用）。
+     *
+     * <p>P3 编排一次请求串了好几个 LLM 阶段，每个阶段各记一条 ai_generation_log。
+     * 本次运行的 token 合计就按「用户 + 时间窗（runStart·runEnd）」归集，
+     * 这样即便 PARSE/CANDIDATE 阶段还没拿到 tripId，也能被这次运行的 meta 算进来。
+     *
+     * @return 形如：
+     *         <pre>
+     * { "totalTokens": 1801, "callCount": 7, "estCost": 0.000360 }
+     * </pre>
+     *         estCost 仅在「每家单价都已配置」时才非 null（口径与 {@link #sumTokensByUserAndDate} 一致）。
+     */
+    Map<String, Object> sumByUserSince(Long userId, LocalDateTime since, LocalDateTime to);
 
     /**
      * 各阶段成功率（含失败率）。
