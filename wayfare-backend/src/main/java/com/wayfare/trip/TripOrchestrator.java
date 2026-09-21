@@ -270,9 +270,15 @@ public class TripOrchestrator {
                 continue;
             }
             List<TripDraftDTO.ItemDraft> items = day.getItems();
+            // 先把当天所有点位的事实（坐标 / poiUid / 来源标记）回填完，再决定哪些段能调路线。
+            // 顺序不能反：P3-D 只产出 poiRef 与时段，坐标是这里回填的；若边回填边判断，
+            // hasCoords(next) 读到的是「尚未回填的下一项」，全天每一段都会被误判成「无坐标」
+            // 而跳过路线补全 —— 结果是全部点位挂着 VERIFIED/BAIDU 标记却没有任何距离事实。
+            for (TripDraftDTO.ItemDraft it : items) {
+                resolveFacts(it, poolItems);
+            }
             for (int i = 0; i < items.size(); i++) {
                 TripDraftDTO.ItemDraft item = items.get(i);
-                resolveFacts(item, poolItems);
                 TripDraftDTO.ItemDraft next = (i < items.size() - 1) ? items.get(i + 1) : null;
                 if (mapLive && next != null && hasCoords(item) && hasCoords(next)) {
                     tasks.add(() -> fillRoute(item, next, intent));

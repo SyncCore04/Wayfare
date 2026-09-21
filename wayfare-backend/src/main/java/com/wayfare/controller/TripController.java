@@ -36,7 +36,7 @@ import java.util.regex.Pattern;
  * 内部串起整条七步管线并落库。其余是行程的查询 / 重排 / 删除。
  */
 @RestController
-@RequestMapping("/api/trip")
+@RequestMapping("/trip")
 public class TripController {
 
     private static final Pattern DAY_INDEX = Pattern.compile("第\\s*(\\d+)\\s*天");
