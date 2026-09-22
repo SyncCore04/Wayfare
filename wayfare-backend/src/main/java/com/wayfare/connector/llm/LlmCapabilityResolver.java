@@ -54,6 +54,33 @@ public class LlmCapabilityResolver {
         return resolveChain().get(0);
     }
 
+    /**
+     * 指定厂商解析（P4-B 的双模型文案对比用）。
+     *
+     * <p><b>刻意不降级</b>：调用方点名要某一家，就是为了看这一家的真实产出。
+     * 如果这家不可用就悄悄换成别家，两份「对比文案」可能出自同一个模型 ——
+     * 对比失去意义，而且结果看起来完全正常，没人会发现。
+     * 所以这里不可用就如实抛错，让调用方收到明确的 error 事件。
+     *
+     * <p>与 {@link #resolve()} 的分工：{@code resolve()} 回答「这次该用谁」（含降级链），
+     * 本方法回答「就用这一家，能不能用」。
+     */
+    public ResolvedLlm resolveFor(String providerName) {
+        if (!isEnabled()) {
+            throw new LlmException(ResultCode.LLM_DISABLED, providerName, "llm.enabled=false");
+        }
+        LlmProvider provider = factory.get(providerName);
+        if (provider == null) {
+            throw new LlmException(ResultCode.LLM_NOT_AVAILABLE, providerName,
+                    "厂商 '" + providerName + "' 未注册");
+        }
+        if (!isAvailable(provider)) {
+            throw new LlmException(ResultCode.LLM_NOT_AVAILABLE, providerName,
+                    "厂商 '" + providerName + "' 当前不可用：" + provider.info().reason());
+        }
+        return ResolvedLlm.primary(provider);
+    }
+
     /** llm.enabled 当前值（L2 → L1 分层读取），诊断接口用它回答「能力开了没有」 */
     public boolean isEnabled() {
         return sysConfigService.getBool(KEY_ENABLED, llmProperties.isEnabled());

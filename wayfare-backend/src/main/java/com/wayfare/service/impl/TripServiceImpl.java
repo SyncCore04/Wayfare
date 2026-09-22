@@ -122,6 +122,29 @@ public class TripServiceImpl implements TripService {
     }
 
     @Override
+    public void updateGuideText(Long tripId, Long userId, String guideText) {
+        if (guideText == null) {
+            // 本方法只负责「写回生成好的文案」。要清空列得用 UpdateWrapper.set()，
+            // 因为下面的 updateById 会跳过 null 字段 —— 拿 null 来调它等于什么都没做，
+            // 不如在这里显式返回，免得调用方以为自己清空成功了。
+            return;
+        }
+        // 归属校验：按 id + userId 查一次，别人的行程一律当不存在（行程是私有数据）
+        Trip existing = tripMapper.selectOne(new LambdaQueryWrapper<Trip>()
+                .eq(Trip::getId, tripId)
+                .eq(Trip::getUserId, userId));
+        if (existing == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "行程不存在");
+        }
+        // 只带 id 与 guideText 的补丁对象：updateById 跳过 null 字段，
+        // 所以这次更新只动 guide_text 一列，title/status/子表都不会被牵连
+        Trip patch = new Trip();
+        patch.setId(tripId);
+        patch.setGuideText(guideText);
+        tripMapper.updateById(patch);
+    }
+
+    @Override
     public void updateItemOrder(Long tripId, Integer dayIndex, List<Long> itemIdsInOrder) {
         if (itemIdsInOrder == null) {
             return;

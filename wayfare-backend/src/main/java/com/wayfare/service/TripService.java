@@ -81,4 +81,18 @@ public interface TripService {
      *                        实现方按数组下标回写 {@code seq}（0 起）
      */
     void updateItemOrder(Long tripId, Integer dayIndex, List<Long> itemIdsInOrder);
+
+    /**
+     * 写回攻略文案（P4-B）。
+     *
+     * <p>文案是「锦上添花」环节：它可能生成失败、可能被用户中断，而行程本身早已可用。
+     * 所以它不走 {@link #saveFullTrip}（那是整份行程的原子替换，会把子表删了重建），
+     * 而是一个只动 {@code trip.guide_text} 一列的单字段更新 ——
+     * 失败或中断时什么都不写，行程完好无损。
+     *
+     * <p>同样必须校验 {@code userId} 归属。
+     *
+     * @param guideText 生成的文案；传 null 表示「无事可做」（本方法不支持把列清空）
+     */
+    void updateGuideText(Long tripId, Long userId, String guideText);
 }

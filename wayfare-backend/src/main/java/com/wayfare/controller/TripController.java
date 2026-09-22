@@ -104,6 +104,26 @@ public class TripController {
     }
 
     /**
+     * 重新生成攻略文案（P4-B）：{@code POST /api/trip/{id}/regenerate-copy}。
+     *
+     * <p><b>只重生成文案，不重跑管线</b>：行程已经在库里了。重跑一遍要 3 次大模型调用、
+     * 几分钟、全量 token；这里只有 1 次 —— 文案失败或用户不满意时不必重花全量 token。
+     *
+     * <p>响应同样是 {@code text/event-stream}（{@code stage} → {@code delta} → {@code done}），
+     * 但<b>不会有 {@code itinerary} 事件</b>：行程没变，没有新骨架可推。
+     *
+     * @param provider 指定厂商（{@code qwen} / {@code glm} / {@code deepseek}），
+     *                 用于双模型文案效果对比；不传则走常规降级链。
+     *                 指定时<b>不降级</b>：不可用会直接收到 {@code error} 事件，
+     *                 而不是被悄悄换成别家（否则两份「对比文案」可能同源）。
+     */
+    @PostMapping(value = "/{id}/regenerate-copy", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter regenerateCopy(@PathVariable Long id,
+                                     @RequestParam(required = false) String provider) {
+        return tripStreamService.regenerateCopy(UserContext.getUserId(), id, provider);
+    }
+
+    /**
      * 行程详情（本人可见）。
      */
     @GetMapping("/{id}")
