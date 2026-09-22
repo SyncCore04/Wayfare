@@ -104,17 +104,213 @@
           </div>
         </el-tab-pane>
 
-        <!-- 修改资料 -->
-        <!-- 旅行偏好（P5 占位） -->
+        <!-- 旅行偏好（P5-A） -->
         <el-tab-pane label="旅行偏好" name="preference">
-          <div class="preference-placeholder">
-            <el-icon :size="40" color="#c0c4cc"><Compass /></el-icon>
-            <h3>旅行偏好还没设置</h3>
-            <p>
-              设置偏好后，AI 规划会结合你的节奏、预算与兴趣生成更贴合你的行程。
-              该功能在 P5 阶段接入，当前仅占位。
+          <div class="preference-form" v-loading="prefLoading">
+            <p class="pref-intro">
+              这些偏好会在 AI 规划行程时被参考 —— 填得越具体，生成的行程越贴合你。
+              没有填写任何一项也能保存。
             </p>
-            <el-button type="primary" plain disabled>去设置偏好（待接入）</el-button>
+
+            <el-form label-position="top" class="pref-form">
+              <!-- 喜欢菜系 -->
+              <el-form-item>
+                <template #label>
+                  喜欢菜系
+                  <el-tooltip content="AI 检索餐饮点位时会优先考虑这些菜系" placement="top">
+                    <el-icon class="tip-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <div class="tag-picker">
+                  <el-check-tag
+                    v-for="item in CUISINE_OPTIONS"
+                    :key="item"
+                    :checked="profile.cuisines.includes(item)"
+                    @change="toggleTag('cuisines', item)"
+                  >{{ item }}</el-check-tag>
+                </div>
+                <div class="tag-adder">
+                  <el-input
+                    v-model="customInput.cuisines"
+                    size="small"
+                    placeholder="自定义菜系，回车添加"
+                    @keyup.enter="addCustom('cuisines')"
+                  />
+                  <el-button size="small" @click="addCustom('cuisines')">添加</el-button>
+                </div>
+              </el-form-item>
+
+              <!-- 口味偏好 -->
+              <el-form-item>
+                <template #label>
+                  口味偏好
+                  <el-tooltip content="影响餐饮推荐的筛选，也会写进行程提示" placement="top">
+                    <el-icon class="tip-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <div class="tag-picker">
+                  <el-check-tag
+                    v-for="item in FLAVOR_OPTIONS"
+                    :key="item"
+                    :checked="profile.flavors.includes(item)"
+                    @change="toggleTag('flavors', item)"
+                  >{{ item }}</el-check-tag>
+                </div>
+              </el-form-item>
+
+              <!-- 忌口与过敏 -->
+              <el-form-item>
+                <template #label>
+                  忌口与过敏
+                  <el-tooltip content="硬约束 —— AI 生成的餐饮推荐会严格避开这些食材" placement="top">
+                    <el-icon class="tip-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <div class="tag-picker">
+                  <el-tag
+                    v-for="(item, idx) in profile.taboos"
+                    :key="item"
+                    closable
+                    type="danger"
+                    effect="light"
+                    @close="removeTaboo(idx)"
+                  >{{ item }}</el-tag>
+                  <span v-if="!profile.taboos.length" class="tag-empty">还没有添加忌口</span>
+                </div>
+                <div class="tag-adder">
+                  <el-input
+                    v-model="tabooInput"
+                    size="small"
+                    placeholder="输入后回车添加，如「香菜」"
+                    @keyup.enter="addTaboo"
+                  />
+                  <el-button size="small" @click="addTaboo">添加</el-button>
+                </div>
+                <p class="field-note strong">AI 生成餐饮建议时会严格避开这些食材</p>
+              </el-form-item>
+
+              <!-- 旅行风格 -->
+              <el-form-item>
+                <template #label>
+                  旅行风格
+                  <el-tooltip content="决定候选点位从哪几类景点里检索" placement="top">
+                    <el-icon class="tip-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <div class="tag-picker">
+                  <el-check-tag
+                    v-for="item in STYLE_OPTIONS"
+                    :key="item"
+                    :checked="profile.travelStyles.includes(item)"
+                    @change="toggleTag('travelStyles', item)"
+                  >{{ item }}</el-check-tag>
+                </div>
+              </el-form-item>
+
+              <!-- 节奏 -->
+              <el-form-item>
+                <template #label>
+                  节奏
+                  <el-tooltip content="AI 会据此控制每天排几个点位" placement="top">
+                    <el-icon class="tip-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-radio-group v-model="profile.pace">
+                  <el-radio v-for="opt in PACE_OPTIONS" :key="opt.value" :value="opt.value">
+                    {{ opt.label }}<span class="radio-desc">{{ opt.desc }}</span>
+                  </el-radio>
+                </el-radio-group>
+              </el-form-item>
+
+              <!-- 预算倾向 -->
+              <el-form-item>
+                <template #label>
+                  预算倾向
+                  <el-tooltip content="影响点位与餐饮的档位选择" placement="top">
+                    <el-icon class="tip-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-radio-group v-model="profile.budgetLevel">
+                  <el-radio :value="1">经济</el-radio>
+                  <el-radio :value="2">舒适</el-radio>
+                  <el-radio :value="3">品质</el-radio>
+                </el-radio-group>
+              </el-form-item>
+
+              <!-- 常同行人 -->
+              <el-form-item>
+                <template #label>
+                  常同行人
+                  <el-tooltip content="影响交通方式与点位的适龄性" placement="top">
+                    <el-icon class="tip-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-radio-group v-model="profile.companions">
+                  <el-radio v-for="item in COMPANION_OPTIONS" :key="item" :value="item">{{ item }}</el-radio>
+                </el-radio-group>
+              </el-form-item>
+
+              <!-- 单日步行上限 -->
+              <el-form-item>
+                <template #label>
+                  单日步行上限
+                  <el-tooltip content="AI 会据此控制每天的点位密度" placement="top">
+                    <el-icon class="tip-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <div class="slider-row">
+                  <el-slider v-model="profile.walkLimitKm" :min="1" :max="20" :step="1" class="walk-slider" />
+                  <span class="slider-value">{{ profile.walkLimitKm }} 公里</span>
+                </div>
+                <p class="field-note">{{ walkHint }}</p>
+              </el-form-item>
+
+              <!-- 住宿偏好 -->
+              <el-form-item>
+                <template #label>
+                  住宿偏好
+                  <el-tooltip content="影响行程的起止点与每天的首末点位" placement="top">
+                    <el-icon class="tip-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-input
+                  v-model="profile.hotelPref"
+                  maxlength="50"
+                  placeholder="如「民宿」「青年旅舍」「市区商务酒店」"
+                />
+              </el-form-item>
+
+              <!-- 自由备注 -->
+              <el-form-item>
+                <template #label>
+                  自由备注
+                  <el-tooltip content="会原样交给 AI 作为补充约束" placement="top">
+                    <el-icon class="tip-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-input
+                  v-model="profile.notes"
+                  type="textarea"
+                  :rows="3"
+                  maxlength="200"
+                  show-word-limit
+                  placeholder="如「不喜欢人多的景区」「拍古建时希望光线好」"
+                />
+              </el-form-item>
+
+              <!-- 隐私开关（铁律三的入口） -->
+              <el-form-item>
+                <div class="privacy-row">
+                  <el-switch v-model="profile.allowAiUse" :active-value="1" :inactive-value="0" />
+                  <span class="privacy-label">允许 AI 生成行程时使用我的偏好</span>
+                </div>
+                <p class="field-note">关闭后 AI 不会读取这些信息，生成的行程将不体现你的个人偏好</p>
+              </el-form-item>
+
+              <el-form-item>
+                <el-button type="primary" :loading="prefSaving" @click="savePreference">保存偏好</el-button>
+              </el-form-item>
+            </el-form>
           </div>
         </el-tab-pane>
 
@@ -169,7 +365,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import WorkCard from '@/components/WorkCard.vue'
@@ -177,6 +373,7 @@ import { useUserStore } from '@/stores/user'
 import { getUserWorks } from '@/api/work'
 import { getMyFavorites, getMyFollowing, getMyFollowers, unfollowUser, followUser } from '@/api/social'
 import { updateUser, uploadAvatar } from '@/api/user'
+import { getTravelProfile, saveTravelProfile } from '@/api/profile'
 
 const route = useRoute()
 const router = useRouter()
@@ -233,6 +430,8 @@ onMounted(() => {
   if (route.query.tab) activeTab.value = route.query.tab
   initSettingsForm()
   fetchMyWorks()
+  // 直接落在偏好页签时 watch 不会触发（值没变），这里补一次
+  if (activeTab.value === 'preference') fetchPreference()
 })
 
 function initSettingsForm() {
@@ -316,6 +515,7 @@ watch(activeTab, (tab) => {
   if (tab === 'favorites' && favorites.value.length === 0) fetchFavorites()
   if (tab === 'following' && followingList.value.length === 0) fetchFollowing()
   if (tab === 'followers' && followersList.value.length === 0) fetchFollowers()
+  if (tab === 'preference' && !prefLoaded.value) fetchPreference()
 })
 
 async function handleUnfollow(userId) {
@@ -382,6 +582,154 @@ async function saveSettings() {
     // 错误已处理
   } finally {
     saving.value = false
+  }
+}
+
+// ==================== 旅行偏好（P5-A） ====================
+
+// 手册指定的固定选项。菜系可自定义、忌口自由输入，各走自己的输入框。
+const CUISINE_OPTIONS = ['晋菜', '川菜', '粤菜', '淮扬', '面食', '火锅', '烧烤', '日料', '西餐', '家常菜']
+const FLAVOR_OPTIONS = ['偏清淡', '偏咸', '偏辣', '微辣', '重辣', '偏甜', '偏酸']
+const STYLE_OPTIONS = ['古建探访', '自然风光', '博物馆', '市井烟火', '摄影旅拍', '亲子出行', '城市漫步', '美食之旅']
+const PACE_OPTIONS = [
+  { value: 1, label: '慢', desc: '每天 2-3 个点，留足闲逛时间' },
+  { value: 2, label: '适中', desc: '每天 3-4 个点' },
+  { value: 3, label: '紧凑', desc: '每天 4-5 个点' }
+]
+const COMPANION_OPTIONS = ['独自', '情侣', '朋友', '家庭带娃', '带长辈']
+
+// 字段与后端 TravelProfileDTO 一一对应。
+// 列表类字段在库里是逗号分隔字符串（CSV），提交前用 toCsv 转回去。
+const profile = reactive({
+  cuisines: [],
+  flavors: [],
+  taboos: [],
+  travelStyles: [],
+  pace: null,
+  budgetLevel: null,
+  companions: '',
+  walkLimitKm: 5,
+  hotelPref: '',
+  notes: '',
+  allowAiUse: 1
+})
+
+const customInput = reactive({ cuisines: '' })
+const tabooInput = ref('')
+const prefLoading = ref(false)
+const prefSaving = ref(false)
+// 只在第一次切到该页签时拉取，避免把用户还没保存的编辑覆盖掉
+const prefLoaded = ref(false)
+
+// 滑块含义的引导文案（描述这个值意味着什么，不是对点位数量的承诺）
+const walkHint = computed(() => {
+  const km = profile.walkLimitKm
+  if (km <= 3) return `${km} 公里：活动范围集中在步行可达的街区`
+  if (km <= 8) return `${km} 公里：大致覆盖一个城区，点位之间可搭配短途交通`
+  if (km <= 14) return `${km} 公里：可跨区安排，建议用公共交通串联`
+  return `${km} 公里：范围较大，更适合自驾或包车`
+})
+
+function toggleTag(field, value) {
+  const arr = profile[field]
+  const i = arr.indexOf(value)
+  if (i >= 0) arr.splice(i, 1)
+  else arr.push(value)
+}
+
+// 自定义菜系：回车或点「添加」都走这里，重复项直接拦掉（验收 3 的「去重」）
+function addCustom(field) {
+  const raw = (customInput[field] || '').trim()
+  if (!raw) return
+  if (profile[field].includes(raw)) {
+    ElMessage.warning(`「${raw}」已经在列表里了`)
+    customInput[field] = ''
+    return
+  }
+  profile[field].push(raw)
+  customInput[field] = ''
+}
+
+function addTaboo() {
+  const raw = tabooInput.value.trim()
+  if (!raw) return
+  if (profile.taboos.includes(raw)) {
+    ElMessage.warning(`「${raw}」已经在列表里了`)
+    tabooInput.value = ''
+    return
+  }
+  profile.taboos.push(raw)
+  tabooInput.value = ''
+}
+
+function removeTaboo(index) {
+  profile.taboos.splice(index, 1)
+}
+
+// 库里的逗号分隔字符串 ↔ 前端数组。中英文逗号都认，与后端 ProfileRenderer 的拆分口径一致。
+function splitCsv(raw) {
+  if (!raw) return []
+  return String(raw).split(/[,，]/).map(s => s.trim()).filter(Boolean)
+}
+
+function toCsv(arr) {
+  return arr && arr.length ? arr.join(',') : null
+}
+
+// 用后端返回值回填表单 —— 保存后直接用它，省一次 GET，也保证界面与库里完全一致
+function applyProfile(d) {
+  const data = d || {}
+  profile.cuisines = splitCsv(data.cuisines)
+  profile.flavors = splitCsv(data.flavors)
+  profile.taboos = splitCsv(data.taboos)
+  profile.travelStyles = splitCsv(data.travelStyles)
+  profile.pace = data.pace != null ? data.pace : null
+  profile.budgetLevel = data.budgetLevel != null ? data.budgetLevel : null
+  profile.companions = data.companions || ''
+  profile.walkLimitKm = data.walkLimitKm != null ? data.walkLimitKm : 5
+  profile.hotelPref = data.hotelPref || ''
+  profile.notes = data.notes || ''
+  // 后端「不传按 1 处理」；读回来是 null 时同样落成 1（默认开启）
+  profile.allowAiUse = data.allowAiUse != null ? data.allowAiUse : 1
+}
+
+async function fetchPreference() {
+  prefLoading.value = true
+  try {
+    const res = await getTravelProfile()
+    applyProfile(res.data)
+    prefLoaded.value = true
+  } catch (e) {
+    // 错误已由 request 拦截器统一提示
+  } finally {
+    prefLoading.value = false
+  }
+}
+
+async function savePreference() {
+  prefSaving.value = true
+  try {
+    // 后端是整体替换语义：必须提交完整表单，否则未提交的字段会被清空。
+    // 空字符串一律转 null —— 本表可空列用 DEFAULT NULL，null 与 '' 两种表示会让 WHERE IS NULL 静默漏行
+    const res = await saveTravelProfile({
+      cuisines: toCsv(profile.cuisines),
+      flavors: toCsv(profile.flavors),
+      taboos: toCsv(profile.taboos),
+      travelStyles: toCsv(profile.travelStyles),
+      pace: profile.pace,
+      budgetLevel: profile.budgetLevel,
+      companions: profile.companions || null,
+      walkLimitKm: profile.walkLimitKm,
+      hotelPref: profile.hotelPref.trim() || null,
+      notes: profile.notes.trim() || null,
+      allowAiUse: profile.allowAiUse
+    })
+    applyProfile(res.data)
+    ElMessage.success('偏好已保存')
+  } catch (e) {
+    // 错误已由 request 拦截器统一提示
+  } finally {
+    prefSaving.value = false
   }
 }
 
@@ -469,25 +817,109 @@ function goUser(id) {
   padding: 20px 24px;
 }
 
-// 旅行偏好占位（P5 填内容）
-.preference-placeholder {
-  text-align: center;
-  padding: 48px 20px;
+// 旅行偏好（P5-A）
+.preference-form {
+  max-width: 720px;
+}
+
+.pref-intro {
+  font-size: 13px;
   color: #909399;
+  line-height: 1.7;
+  margin: 0 0 20px;
+  padding: 10px 14px;
+  background: #f5f7fa;
+  border-radius: 6px;
+}
 
-  h3 {
-    font-size: 16px;
-    color: #606266;
-    margin: 12px 0 8px;
+.pref-form {
+  :deep(.el-form-item__label) {
+    display: flex;
+    align-items: center;
+    gap: 4px;
     font-weight: 500;
+    color: #303133;
+    padding-bottom: 6px;
   }
+}
 
-  p {
-    font-size: 13px;
-    line-height: 1.7;
-    max-width: 460px;
-    margin: 0 auto 16px;
+.tip-icon {
+  font-size: 14px;
+  color: #c0c4cc;
+  cursor: help;
+
+  &:hover {
+    color: #409eff;
   }
+}
+
+.tag-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  margin-bottom: 10px;
+}
+
+.tag-empty {
+  font-size: 13px;
+  color: #c0c4cc;
+}
+
+.tag-adder {
+  display: flex;
+  gap: 8px;
+  max-width: 320px;
+}
+
+.field-note {
+  width: 100%;
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.6;
+
+  &.strong {
+    font-weight: 600;
+    color: #606266;
+  }
+}
+
+.radio-desc {
+  margin-left: 6px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+}
+
+.walk-slider {
+  flex: 1;
+  max-width: 360px;
+}
+
+.slider-value {
+  min-width: 64px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #303133;
+}
+
+.privacy-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.privacy-label {
+  font-size: 14px;
+  color: #303133;
 }
 
 
@@ -585,6 +1017,27 @@ function goUser(id) {
   }
   .profile-content {
     padding: 16px 12px;
+  }
+  // 旅行偏好：手机上表单不溢出（验收 5）
+  .tag-adder {
+    max-width: 100%;
+  }
+  .slider-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .walk-slider {
+    max-width: 100%;
+  }
+  .radio-desc {
+    display: block;
+    margin-left: 0;
+  }
+  .pref-form :deep(.el-radio) {
+    display: flex;
+    align-items: center;
+    height: auto;
+    margin-bottom: 6px;
   }
 }
 </style>
