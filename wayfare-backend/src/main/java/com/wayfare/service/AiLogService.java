@@ -1,6 +1,7 @@
 package com.wayfare.service;
 
 import com.wayfare.connector.governance.ExternalCallRecord;
+import com.wayfare.dto.GenerationLogQuery;
 import com.wayfare.trip.AiStageRecord;
 
 import java.math.BigDecimal;
@@ -170,4 +171,34 @@ public interface AiLogService {
      *         「成功率 0%」是错的（不是失败了，是压根没跑过）。
      */
     Map<String, Object> generationStats(LocalDate from, LocalDate to);
+
+    /**
+     * 每日趋势（P6-B · 看板折线图）。
+     *
+     * <p>窗口内<b>每一天都会出现一行</b>（包括一条记录都没有的那天）——
+     * 折线图缺日期会在视觉上把两天的点连成直线，看起来像「那天也在跑」。
+     *
+     * @return 形如：
+     *         <pre>
+     * {
+     *   "days": [ {statDate, totalCount, successCount, successRate, totalTokens, estCost} ],
+     *   "totals": {totalCount, successCount, successRate, totalTokens, estCost}
+     * }
+     * </pre>
+     *         <b>estCost 的三态口径</b>：当天一条记录都没有 → 0（确实没花钱）；
+     *         当天有记录且算得出 → 累加值；当天有记录但一条都算不出（单价未配置）→ <b>null</b>（不编造）。
+     *         比率类字段分母为 0 时同样返回 null。
+     */
+    Map<String, Object> dailyTrend(LocalDate from, LocalDate to);
+
+    /**
+     * 生成明细分页（P6-B · 看板表格）。
+     *
+     * <p>按阶段逐行返回（一次生成会占 5~7 行），并带上 trip 的目的地/天数/地图模式，
+     * 便于「筛目的地」「筛 mapMode」这类运维常用的排查动作。
+     *
+     * @return 形如 {@code {total, page, size, records:[...]}}；records 里的字段见
+     *         {@code GenerationLogSqlProvider} 的 SELECT 列。
+     */
+    Map<String, Object> pageStages(GenerationLogQuery query);
 }

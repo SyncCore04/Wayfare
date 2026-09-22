@@ -44,6 +44,12 @@ class GovernedExternalHttpClientTest {
         public Map<String, Object> stats(String connector) {
             return Map.of();
         }
+
+        /** P6-B 又加了 page(...)（看板页签用）。同理，本测试不关心分页，返回空页。 */
+        @Override
+        public Map<String, Object> page(String connector, int page, int size) {
+            return Map.of("total", 0, "records", List.of());
+        }
     }
 
     private SimpleExternalHttpClient transport;
@@ -208,8 +214,8 @@ class GovernedExternalHttpClientTest {
     @Test
     @DisplayName("补充：日志服务自身抛异常不能影响主流程")
     void logFailureDoesNotBreakCall() {
-        // P1-E 之后 ExternalCallLogService 有两个抽象方法，不再是函数式接口，
-        // 所以这里必须用匿名类而不是 lambda
+        // ExternalCallLogService 到 P6-B 已有三个抽象方法（record / stats / page），
+        // 从来不是函数式接口，所以这里必须用匿名类而不是 lambda
         ExternalCallLogService broken = new ExternalCallLogService() {
             @Override
             public void record(ExternalCallRecord record) {
@@ -219,6 +225,11 @@ class GovernedExternalHttpClientTest {
             @Override
             public Map<String, Object> stats(String connector) {
                 return Map.of();
+            }
+
+            @Override
+            public Map<String, Object> page(String connector, int page, int size) {
+                throw new RuntimeException("表不存在");
             }
         };
         GovernedExternalHttpClient c = new GovernedExternalHttpClient(transport, broken);

@@ -30,4 +30,19 @@ public interface ExternalCallLogService {
      *         状态卡片要能直接告诉管理员「上次为什么失败」，而不是让他再去翻日志表。
      */
     Map<String, Object> stats(String connector);
+
+    /**
+     * 外呼日志分页（P6-B · 看板「外部调用」页签）。
+     *
+     * <p><b>只读，没有删除入口</b>：日志是证据链，可删的日志等于没有日志
+     * （手册 P6-B 明确要求「不要把 AI 生成日志做成可删除的」）。
+     *
+     * @param connector 连接器类型，传 null 表示全部
+     * @param page      页码，从 1 起
+     * @param size      每页条数（调用方需自行限幅）
+     * @return 形如 {@code {total, page, size, records:[...]}}；
+     *         查询失败时返回 {@code {error}} 而不是抛异常 —— 看板的一个页签挂掉
+     *         不该让整个页面变成 500。
+     */
+    Map<String, Object> page(String connector, int page, int size);
 }

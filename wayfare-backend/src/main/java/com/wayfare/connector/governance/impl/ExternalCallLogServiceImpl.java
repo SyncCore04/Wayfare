@@ -88,4 +88,24 @@ public class ExternalCallLogServiceImpl implements ExternalCallLogService {
         }
         return stats;
     }
+
+    // ==================== 分页（P6-B 看板「外部调用」页签） ====================
+
+    @Override
+    public Map<String, Object> page(String connector, int page, int size) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        try {
+            long total = mapper.countCalls(connector);
+            result.put("total", total);
+            result.put("page", page);
+            result.put("size", size);
+            result.put("records", total == 0 ? java.util.List.of()
+                    : mapper.pageCalls(connector, Math.max(0, (page - 1) * size), size));
+        } catch (Exception e) {
+            // 与 stats() 同一取舍：一个页签查不出来不该让整个看板 500，
+            // 但必须如实说出原因，不能装作「没有数据」
+            result.put("error", "外部调用日志查询失败：" + e.getMessage());
+        }
+        return result;
+    }
 }

@@ -2,9 +2,11 @@ package com.wayfare.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.wayfare.entity.AiGenerationLog;
+import com.wayfare.mapper.provider.GenerationLogSqlProvider;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.SelectProvider;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -254,4 +256,45 @@ public interface AiGenerationLogMapper extends BaseMapper<AiGenerationLog> {
     List<Map<String, Object>> topErrors(@Param("from") LocalDateTime from,
                                         @Param("to") LocalDateTime to,
                                         @Param("limit") int limit);
+
+    // ==================== P6-B 监控看板 ====================
+
+    /**
+     * 每日趋势（P6-B · 折线图），按「天 × 厂商」分组。
+     *
+     * <p><b>为什么必须按厂商拆开</b>：单价是每家一套（{@code llm.price.{provider}-*}），
+     * 把同一天里各家的 token 加总之后就没法算钱了 —— 成本由调用方在 Java 侧按行累加。
+     *
+     * <p>用 {@code DATE_FORMAT} 而不是 {@code DATE()}：后者返回 {@code java.sql.Date}，
+     * Jackson 会把它序列化成时间戳数字，前端还得再转一次；直接给 {@code yyyy-MM-dd} 字符串最省事。
+     */
+    @Select("""
+            SELECT DATE_FORMAT(created_at, '%Y-%m-%d')                         AS statDate,
+                   provider                                                   AS provider,
+                   COUNT(*)                                                   AS totalCount,
+                   CAST(SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) AS SIGNED) AS successCount,
+                   CAST(SUM(prompt_tokens)     AS SIGNED)                     AS promptTokens,
+                   CAST(SUM(completion_tokens) AS SIGNED)                     AS completionTokens,
+                   CAST(SUM(total_tokens)      AS SIGNED)                     AS totalTokens
+            FROM ai_generation_log
+            WHERE created_at >= #{from}
+              AND created_at <  #{to}
+            GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d'), provider
+            ORDER BY statDate
+            """)
+    List<Map<String, Object>> trendByDayAndProvider(@Param("from") LocalDateTime from,
+                                                    @Param("to") LocalDateTime to);
+
+    /**
+     * 生成明细分页（P6-B · 看板表格）。
+     *
+     * <p>WHERE 由 {@link GenerationLogSqlProvider} 统一提供 —— 它与 count 必须一致，
+     * 各写一份迟早会漂移（见该类注释）。
+     */
+    @SelectProvider(type = GenerationLogSqlProvider.class, method = "pageSql")
+    List<Map<String, Object>> pageLogs(Map<String, Object> query);
+
+    /** 生成明细总数（与 {@link #pageLogs} 共用同一个 WHERE） */
+    @SelectProvider(type = GenerationLogSqlProvider.class, method = "countSql")
+    long countLogs(Map<String, Object> query);
 }

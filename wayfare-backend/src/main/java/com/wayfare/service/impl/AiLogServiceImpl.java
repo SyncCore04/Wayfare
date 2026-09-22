@@ -3,6 +3,7 @@ package com.wayfare.service.impl;
 import com.wayfare.common.util.MaskUtil;
 import com.wayfare.connector.governance.ExternalCallLogService;
 import com.wayfare.connector.governance.ExternalCallRecord;
+import com.wayfare.dto.GenerationLogQuery;
 import com.wayfare.entity.AiGenerationLog;
 import com.wayfare.mapper.AiGenerationLogMapper;
 import com.wayfare.service.AiLogService;
@@ -373,6 +374,91 @@ public class AiLogServiceImpl implements AiLogService {
         result.put("stageBreakdown", buildStageBreakdown(start, end));
         result.put("mapModeBreakdown", buildMapModeBreakdown(start, end));
         result.put("topErrors", topErrors(from, to, 10));
+        return result;
+    }
+
+    // ==================== P6-B 监控看板 ====================
+
+    @Override
+    public Map<String, Object> dailyTrend(LocalDate from, LocalDate to) {
+        LocalDateTime start = from.atStartOfDay();
+        LocalDateTime end = to.plusDays(1).atStartOfDay();
+
+        List<Map<String, Object>> rows = aiGenerationLogMapper.trendByDayAndProvider(start, end);
+        Map<String, List<Map<String, Object>>> rowsByDay = new LinkedHashMap<>();
+        for (Map<String, Object> row : rows) {
+            Object date = row.get("statDate");
+            if (date != null) {
+                rowsByDay.computeIfAbsent(String.valueOf(date), k -> new ArrayList<>()).add(row);
+            }
+        }
+
+        List<Map<String, Object>> days = new ArrayList<>();
+        long countSum = 0;
+        long successSum = 0;
+        Long tokenSum = null;
+        BigDecimal costSum = null;
+        boolean anyCostKnown = false;
+
+        // 遍历整个区间而不是只遍历有数据的天：折线图缺日期会把两天的点直接连起来，
+        // 视觉上像「那天也在跑」。补 0 才是诚实的。
+        for (LocalDate day = from; !day.isAfter(to); day = day.plusDays(1)) {
+            String date = day.toString();
+            List<Map<String, Object>> dayRows = rowsByDay.getOrDefault(date, List.of());
+
+            long dayCount = 0;
+            long daySuccess = 0;
+            Long dayTokens = null;
+            for (Map<String, Object> row : dayRows) {
+                dayCount += toLongOrZero(row.get("totalCount"));
+                daySuccess += toLongOrZero(row.get("successCount"));
+                dayTokens = addNullable(dayTokens, toLong(row.get("totalTokens")));
+            }
+            // 成本按厂商分别算完再相加（单价每家一套）—— 直接复用管道那套计算，避免两处口径
+            BigDecimal dayCost = (BigDecimal) aggregateTokens(dayRows).get("estCost");
+
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("statDate", date);
+            item.put("totalCount", dayCount);
+            item.put("successCount", daySuccess);
+            item.put("successRate", rate(daySuccess, dayCount));
+            item.put("totalTokens", dayTokens);
+            item.put("estCost", dayCost != null ? dayCost : (dayCount == 0 ? BigDecimal.ZERO : null));
+            days.add(item);
+
+            countSum += dayCount;
+            successSum += daySuccess;
+            tokenSum = addNullable(tokenSum, dayTokens);
+            if (dayCost != null) {
+                costSum = costSum == null ? dayCost : costSum.add(dayCost);
+                anyCostKnown = true;
+            }
+        }
+
+        Map<String, Object> totals = new LinkedHashMap<>();
+        totals.put("totalCount", countSum);
+        totals.put("successCount", successSum);
+        totals.put("successRate", rate(successSum, countSum));
+        totals.put("totalTokens", tokenSum);
+        totals.put("estCost", anyCostKnown ? costSum : (countSum == 0 ? BigDecimal.ZERO : null));
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("days", days);
+        result.put("totals", totals);
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> pageStages(GenerationLogQuery query) {
+        Map<String, Object> params = query.toParamMap();
+        long total = aiGenerationLogMapper.countLogs(params);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("total", total);
+        result.put("page", query.getPage());
+        result.put("size", query.getSize());
+        // 总数为 0 时不再查当页：既省一次查询，也避免 offset 超出范围时的空跑
+        result.put("records", total == 0 ? List.of() : aiGenerationLogMapper.pageLogs(params));
         return result;
     }
 

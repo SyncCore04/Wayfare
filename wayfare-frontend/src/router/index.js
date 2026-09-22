@@ -109,6 +109,12 @@ const routes = [
         name: 'AdminConnectors',
         component: () => import('@/views/admin/Connectors.vue'),
         meta: { title: '连接器管理' }
+      },
+      {
+        path: 'generation',
+        name: 'AdminGeneration',
+        component: () => import('@/views/admin/Generation.vue'),
+        meta: { title: 'AI 生成监控' }
       }
     ]
   },

@@ -35,6 +35,10 @@
             <el-icon><Connection /></el-icon>
             <template #title>连接器管理</template>
           </el-menu-item>
+          <el-menu-item index="/admin/generation">
+            <el-icon><TrendCharts /></el-icon>
+            <template #title>AI 生成监控</template>
+          </el-menu-item>
         </el-menu>
       </el-aside>
 

@@ -81,3 +81,21 @@ export function getGenerationStats(from, to) {
 export function getTripBreakdown(tripId) {
   return request({ url: `/admin/generation/trips/${tripId}/breakdown`, method: 'get' })
 }
+
+// 每日趋势（P6-B 折线图）：窗口含今天，往前数 days 天；每一天都会有一行（含没有数据的 0）
+export function getGenerationTrend(days = 7) {
+  return request({ url: '/admin/generation/trend', method: 'get', params: { days } })
+}
+
+/**
+ * 生成明细分页（P6-B 表格）。
+ * 筛选条件为空的键不要传 —— 传空串后端会当「没填」，但少传更清楚。
+ */
+export function getGenerationLogs(params) {
+  return request({ url: '/admin/generation/logs', method: 'get', params })
+}
+
+// 外部调用日志分页（P6-B 第二个页签）。connector 传 null/不传 = 全部
+export function getExternalCalls({ connector, page = 1, size = 20 } = {}) {
+  return request({ url: '/admin/generation/external-calls', method: 'get', params: { connector, page, size } })
+}
