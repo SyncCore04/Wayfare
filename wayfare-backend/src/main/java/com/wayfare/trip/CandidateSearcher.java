@@ -204,7 +204,7 @@ public class CandidateSearcher {
 
         evaluateShortage(pool);
 
-        recordStage(llmHolder, System.currentTimeMillis() - startMs, pool);
+        recordStage(llmHolder, System.currentTimeMillis() - startMs, pool, mapLive);
         return pool;
     }
 
@@ -467,6 +467,8 @@ public class CandidateSearcher {
                 log.warn("地图关闭时让大模型生成候选失败（{}），返回空池并如实上报 shortage", e.getMessage());
                 holder.call = null;
                 holder.usage = usageRef.get();
+                // 记下「最后尝试的厂商」：失败也要能归因到厂商，否则指标里这次失败无处可归
+                holder.failedProvider = e.getProvider();
                 return List.of();
             }
             holder.call = call;
@@ -860,6 +862,13 @@ public class CandidateSearcher {
     private static final class LlmCallContextHolder {
         LlmCapabilityResolver.LlmCallResult<String> call;
         LlmUsage usage;
+        /**
+         * 调用彻底失败时「最后尝试过的厂商」（P7-B 前修）。
+         *
+         * <p>没有它的话，失败时只能记 null，而阶段日志里「谁失败了」恰恰是最该留痕的信息 ——
+         * 一次 glm 超时导致的候选池为空，看起来会像「谁都没参与」。
+         */
+        String failedProvider;
     }
 
     /**
@@ -867,13 +876,26 @@ public class CandidateSearcher {
      *
      * <p>地图路径下 provider/model 记的是地图侧的 provider（百度/缓存），
      * LLM 路径下记的是大模型。两条路径都只写一条 —— 一个阶段一条是 P2-C 定下的口径。
+     *
+     * <p>🔴 <b>走哪条路径必须由调用方显式告知（{@code mapPath}），不能靠「有没有成功调到大模型」反推</b>
+     * （2026-09-23 修）：原来的判据是 {@code holder.call != null}，而**大模型超时失败时它恰好是 null**，
+     * 于是 LLM 路径被误判成地图路径，这次失败被记成 {@code provider=cache} ——
+     * 一次 glm 超时导致的候选池为空，在日志里看起来像「缓存提供者出的问题」。
+     * 这种「失败时归因错人」比没有归因更坏：按厂商统计的指标会稳定地偏。
+     *
+     * @param mapPath 本阶段是否走地图路径（调用方那个 {@code mapLive} 就是它）
      */
-    private void recordStage(LlmCallContextHolder holder, long durationMs, CandidatePool pool) {
-        boolean llmPath = holder.call != null || holder.usage != null;
-        String provider = llmPath
-                ? (holder.call == null ? null : holder.call.used().providerName())
-                : (pool.getMapMode() == MapMode.VERIFIED ? "baidu" : "cache");
-        String model = llmPath && holder.call != null ? holder.call.used().model() : null;
+    private void recordStage(LlmCallContextHolder holder, long durationMs, CandidatePool pool, boolean mapPath) {
+        String provider;
+        String model;
+        if (mapPath) {
+            provider = pool.getMapMode() == MapMode.VERIFIED ? "baidu" : "cache";
+            model = null;
+        } else {
+            // 成功 → 实际服务的厂商；彻底失败 → 最后尝试的厂商（可能为 null，那就如实为 null）
+            provider = holder.call != null ? holder.call.used().providerName() : holder.failedProvider;
+            model = holder.call != null ? holder.call.used().model() : null;
+        }
 
         // 候选池为空视为本阶段未达成目标，如实记失败（不抛异常 —— 空池也是合法结果）
         boolean success = !pool.isEmpty();
