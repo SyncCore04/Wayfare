@@ -244,7 +244,11 @@ public class GovernedExternalHttpClient implements ExternalHttpClient {
     private String inferConnector(String url) {
         if (url == null) return ExternalCallRecord.CONNECTOR_OTHER;
         String u = url.toLowerCase();
-        if (u.contains("bigmodel.cn") || u.contains("deepseek.com")) {
+        // 各家 LLM 的域名。qwen 走 DashScope 的 OpenAI 兼容模式（路径 compatible-mode/v1/...），
+        // 早期漏了它的域名 → qwen 的调用被记成 OTHER，会漏进 P6 诊断与 P7 指标
+        //（2026-09-22 真实联调复现：9 次 qwen 调用全部落成 OTHER，统计里看不到）
+        if (u.contains("bigmodel.cn") || u.contains("deepseek.com")
+                || u.contains("dashscope.aliyuncs.com") || u.contains("moonshot.cn")) {
             return ExternalCallRecord.CONNECTOR_LLM;
         }
         if (u.contains("map.baidu.com")) {

@@ -555,7 +555,9 @@ public class IntentParser {
 
         aiLogService.recordStage(new AiStageRecord(
                 UserContext.getUserId(),
-                null,                       // 解析阶段还没有 tripId
+                // 原先这里写死 null，注释还说「解析阶段还没有 tripId」—— 那句是错的：
+                // 草稿在 Step1 之前就已落库（P3-F 的设计）。写死 null 会让 PARSE 的成本归不到行程上
+                TripRunContext.getTripId(),
                 AiStageRecord.STAGE_PARSE,
                 call == null ? null : call.used().providerName(),
                 call == null ? null : call.used().model(),

@@ -471,7 +471,8 @@ public class ItineraryComposer {
         }
         aiLogService.recordStage(new AiStageRecord(
                 UserContext.getUserId(),
-                null,
+                // 取运行上下文里的 tripId（原先写死 null，导致 COMPOSE 的成本归不到行程上）
+                TripRunContext.getTripId(),
                 AiStageRecord.STAGE_COMPOSE,
                 call == null ? null : call.used().providerName(),
                 call == null ? null : call.used().model(),

@@ -153,6 +153,10 @@ public class TripOrchestrator {
 
         // Step 0/1：先落一条草稿（status=0），后续任何一步失败用户都能续作
         Trip draftTrip = tripService.createDraft(userId, rawInput);
+        // 本次运行的 tripId 要贯穿整条管线：PARSE / CANDIDATE / COMPOSE / VALIDATE 四个阶段的日志
+        // 靠它归属到行程，否则 P4-C 的 breakdownByTrip 会漏算这几个最贵的阶段
+        //（2026-09-22 联调发现：那四个阶段的 trip_id 全是 NULL，拆解表只统计到 COPY 一条）
+        TripRunContext.set(draftTrip.getId());
 
         // 地图能力与画像：这两件是贯穿全管线的上下文
         ResolvedMap capability = mapResolver.resolve();
@@ -177,6 +181,9 @@ public class TripOrchestrator {
         } catch (RuntimeException e) {
             log.warn("行程编排执行到中途失败，草稿 {} 保持 status=0 供续作：{}", draftTrip.getId(), e.getMessage());
             throw e;
+        } finally {
+            // 生成跑在线程池里、线程会被复用：不清理会让下一个任务的日志挂到别人的行程上
+            TripRunContext.clear();
         }
     }
 
@@ -227,18 +234,24 @@ public class TripOrchestrator {
                     com.wayfare.common.result.ResultCode.PARAM_ERROR, "这条行程缺少可用的意图信息，无法重排");
         }
 
-        ResolvedMap capability = mapResolver.resolve();
-        UserTravelProfile profile = loadProfile(userId, true);
-        PipelineOutput out = runPipeline(intent, profile, new ProfileOverrides(), capability, feedback,
-                TripProgressListener.NOOP);
+        // 重排同样要把 tripId 交给管线，否则重排产生的阶段日志又会挂到 NULL 上
+        TripRunContext.set(tripId);
+        try {
+            ResolvedMap capability = mapResolver.resolve();
+            UserTravelProfile profile = loadProfile(userId, true);
+            PipelineOutput out = runPipeline(intent, profile, new ProfileOverrides(), capability, feedback,
+                    TripProgressListener.NOOP);
 
-        if (out.draft() != null) {
-            assembleInto(existing, intent, out);
+            if (out.draft() != null) {
+                assembleInto(existing, intent, out);
+            }
+            recordRouteStage(userId, tripId, out.draft() != null, startMs);
+
+            return new OrchestrationOutcome(tripId, intent, out.draft(), out.report(),
+                    out.pool(), out.composeError(), buildMeta(userId, runStart, startMs, out));
+        } finally {
+            TripRunContext.clear();
         }
-        recordRouteStage(userId, tripId, out.draft() != null, startMs);
-
-        return new OrchestrationOutcome(tripId, intent, out.draft(), out.report(),
-                out.pool(), out.composeError(), buildMeta(userId, runStart, startMs, out));
     }
 
     // ==================== Step 2~7 的串行执行体 ====================

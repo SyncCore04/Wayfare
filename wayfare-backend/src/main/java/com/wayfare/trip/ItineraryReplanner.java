@@ -191,7 +191,8 @@ public class ItineraryReplanner {
         try {
             aiLogService.recordStage(new AiStageRecord(
                     UserContext.getUserId(),
-                    null,
+                    // 取运行上下文里的 tripId（原先写死 null，导致 VALIDATE 归不到行程上）
+                    TripRunContext.getTripId(),
                     AiStageRecord.STAGE_VALIDATE,
                     null,
                     null,

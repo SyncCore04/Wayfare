@@ -881,7 +881,8 @@ public class CandidateSearcher {
 
         aiLogService.recordStage(new AiStageRecord(
                 UserContext.getUserId(),
-                null,
+                // 取运行上下文里的 tripId（原先写死 null，导致 CANDIDATE 的成本归不到行程上）
+                TripRunContext.getTripId(),
                 AiStageRecord.STAGE_CANDIDATE,
                 provider,
                 model,
