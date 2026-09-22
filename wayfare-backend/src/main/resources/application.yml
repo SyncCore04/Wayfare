@@ -160,6 +160,9 @@ llm:
       # 作为**降级备胎**选 glm-4-flash：备胎要的是快和稳（3/3 可用、约 4~15 秒），不是推理强。
       # glm-4.5-flash 推理更强但单次要 70 秒，当备胎会把用户等待拉长到不可接受。
       # 它是非推理模型，响应里没有 reasoning_content。
+      # ⚠️ 2026-09-22 实测过 glm-4.6v-flashx：短输出（PARSE）优秀（11.8s / 801 ct，比 qwen 快 4 倍），
+      #    但长输出（CANDIDATE 要吐 20 个候选）completion 撞满 max-tokens 4096 被截断 → 候选池为空。
+      #    所以**不要**换成它，详见 memory/2026-09-22.md。
       model: glm-4-flash
       temperature: 0.3
       max-tokens: 4096
