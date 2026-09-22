@@ -101,4 +101,73 @@ public interface AiLogService {
      *         单价未配置或 tokens 为 null 时返回 null
      */
     BigDecimal estCost(String provider, Integer tokens);
+
+    /**
+     * 预估成本（P4-C · 输入输出分开计价）。
+     *
+     * <p>公式：
+     * <pre>
+     *   estCost = promptTokens × priceInput ÷ 1e6 + completionTokens × priceOutput ÷ 1e6
+     * </pre>
+     *
+     * <p>单价从 {@code sys_config} 读，两级回落：
+     * <ol>
+     *   <li>优先 {@code llm.price.{provider}-input} / {@code llm.price.{provider}-output}（小数字符串）；</li>
+     *   <li>两个都没配时回落到 {@code llm.price.{provider}}（整数，视作输入输出同价）——
+     *       这是 P2-C 的既有配置，留着它，旧部署升级后不会突然算不出成本。</li>
+     * </ol>
+     * <b>任一侧单价缺失就返回 null</b>，不做「缺失侧按 0 算」——
+     * 那会把成本算低，而成本是要写进简历与答辩的数字。
+     *
+     * @return 成本（保留 4 位小数）；单价未配置、或两侧 token 都为空时返回 null
+     */
+    BigDecimal estCost(String provider, Integer promptTokens, Integer completionTokens);
+
+    /**
+     * 一次生成的 token 与成本拆解（P4-C · 按 trip 归集、分阶段列出）。
+     *
+     * @return 形如：
+     *         <pre>
+     * {
+     *   "tripId": 94,
+     *   "stages": [ {stage, promptTokens, completionTokens, tokens, durationMs, callCount} ],
+     *   "totalTokens": 8433,
+     *   "estCost": 0.0012
+     * }
+     * </pre>
+     *         {@code stages} 按管线顺序（PARSE→CANDIDATE→PREORDER→COMPOSE→VALIDATE→ROUTE→COPY）排列；
+     *         token / estCost 拿不到时是 null，不编 0。
+     */
+    Map<String, Object> breakdownByTrip(Long tripId);
+
+    /**
+     * 某阶段某厂商的历史 completion_tokens 均值（P4-C · 中断节省估算的分母）。
+     *
+     * <p>中断时流式 usage 拿不到（它随最后一个 chunk 返回），只能按
+     * 「同类请求本来会产出多少」来估。同类 = 同 stage + 同 provider 的<b>成功</b>记录。
+     *
+     * @return 均值（四舍五入到整数）；没有历史样本时返回 null（宁可不估，也不编）
+     */
+    Integer avgCompletionTokens(String stage, String provider);
+
+    /**
+     * 生成统计总览（P4-C · 给后台用，P6 对接）。
+     *
+     * <p>对应 {@code GET /api/admin/generation/stats?from=&to=}。
+     *
+     * @return 形如：
+     *         <pre>
+     * {
+     *   totalCount, successCount, successRate, tripCount,
+     *   avgDurationMs, p95DurationMs,
+     *   totalTokens, avgTokensPerTrip, totalEstCost, avgCostPerTrip,
+     *   stageBreakdown:   [{stage, total, avgTokens, avgDurationMs, successRate}],
+     *   mapModeBreakdown: [{mapMode, count, avgDurationMs}],
+     *   topErrors:        [{errorCode, cnt, scene}]
+     * }
+     * </pre>
+     *         <b>分母为 0 的比率一律返回 null，不返回 0</b>：窗口内没有数据时，
+     *         「成功率 0%」是错的（不是失败了，是压根没跑过）。
+     */
+    Map<String, Object> generationStats(LocalDate from, LocalDate to);
 }

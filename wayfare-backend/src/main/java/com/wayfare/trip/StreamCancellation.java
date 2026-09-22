@@ -22,6 +22,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class StreamCancellation {
 
     private final AtomicInteger producedChars = new AtomicInteger();
+
+    /**
+     * 中断前若拿到了 usage，记下已产出的 completion_tokens（P4-C）。
+     *
+     * <p>拿不到就是 null —— <b>绝不按字符数换算一个出来</b>。
+     */
+    private volatile Integer producedTokens;
+
     private volatile boolean cancelled;
     private volatile String reason;
 
@@ -62,6 +70,23 @@ public class StreamCancellation {
         return producedChars.get();
     }
 
+    /**
+     * 记录已产出的 completion_tokens（P4-C）。
+     *
+     * <p>只在调用方<b>真的拿到 usage</b> 时才调用。传 null 表示「没拿到」，
+     * 不会覆盖已有值 —— 免得后一次的空回调把先前的真实数字抹掉。
+     */
+    public void markProducedTokens(Integer tokens) {
+        if (tokens != null) {
+            this.producedTokens = tokens;
+        }
+    }
+
+    /** 已产出的 completion_tokens；未拿到 usage 时为 null */
+    public Integer producedTokens() {
+        return producedTokens;
+    }
+
     /** 已取消就抛 —— 抛在增量回调里即可中断上游读取循环（见类注释） */
     public void checkCancelled() {
         if (cancelled) {
@@ -70,15 +95,41 @@ public class StreamCancellation {
     }
 
     /**
-     * 写进 {@code ai_generation_log.error_msg} 的说明。
+     * 写进 {@code ai_generation_log.error_msg} 的说明（P4-C 升级版：带节省估算）。
      *
-     * <p>刻意不含 token 数字：中断时取不到 usage，写成「节省约 N tokens」就是编数字。
-     * P4-C 会用同类请求均值补上这个估算，那时格式再升级。
+     * <p>两个数字的口径必须分清楚，否则 P7 聚合出来的指标是假的：
+     * <ul>
+     *   <li><b>已产出</b>：只有在中断前真的拿到了 usage 才写数字。流式 usage 随<b>最后一个
+     *       chunk</b> 返回，中断时通常根本拿不到 —— 那就如实写「未知」。
+     *       <b>绝不拿字符数换算成 token</b>，那等于编一个数字。</li>
+     *   <li><b>节省约</b>：这是<b>估算</b>，依据是「同类请求（同 stage 同 provider）历史
+     *       completion_tokens 的均值」，由调用方从 {@code AiLogService.avgCompletionTokens}
+     *       取来传进。没有历史样本时如实写「无法计算」，不编。</li>
+     * </ul>
+     *
+     * <p>格式保持稳定，P7 会用正则从 {@code error_msg} 里抽出「节省约 N tokens」做聚合。
+     *
+     * @param avgCompletionTokens 同类请求的 completion_tokens 均值；null 表示无样本
      */
+    public String interruptionSummary(Integer avgCompletionTokens) {
+        StringBuilder sb = new StringBuilder("客户端断开已中断，");
+        if (producedTokens != null) {
+            sb.append("已产出 ").append(producedTokens).append(" tokens，");
+        } else {
+            sb.append("已产出 token 数未知（usage 随最后一个 chunk 返回，中断时取不到；不按字符数换算），");
+        }
+        if (avgCompletionTokens != null && avgCompletionTokens > 0) {
+            sb.append("按均值估算本次节省约 ").append(avgCompletionTokens).append(" tokens");
+        } else {
+            sb.append("按均值估算本次节省无法计算（无同类历史样本）");
+        }
+        sb.append("；已产出 ").append(producedChars.get()).append(" 字符；已停止后续生成。取消原因：").append(reason);
+        return sb.toString();
+    }
+
+    /** 无同类历史样本时的简写（等价于传 null） */
     public String interruptionSummary() {
-        return "客户端断开已中断，已产出 " + producedChars.get() + " 字符"
-                + "（流式 usage 随最后一个 chunk 返回，中断时取不到 token 数，故不编数字）；"
-                + "已停止后续生成，未生成部分即为本次节省。取消原因：" + reason;
+        return interruptionSummary(null);
     }
 
     /** 中断信号：用异常把上游读取循环炸开，是这里唯一可靠的「关闭连接」手段 */

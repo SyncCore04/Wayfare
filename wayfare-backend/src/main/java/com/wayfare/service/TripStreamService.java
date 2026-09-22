@@ -425,7 +425,13 @@ public class TripStreamService {
 
         try {
             provider.chatStream(systemPrompt, userPrompt,
-                    LlmCallContext.of(u -> usageRef[0] = u),
+                    LlmCallContext.of(u -> {
+                        usageRef[0] = u;
+                        // P4-C：万一 usage 在中断前就回来了，记下已产出的 completion_tokens。
+                        // 流式 usage 通常随最后一个 chunk 返回，所以多数情况下这里是拿不到的 ——
+                        // 拿不到就留 null，绝不按字符数换算
+                        cancellation.markProducedTokens(u == null ? null : u.completionTokens());
+                    }),
                     piece -> {
                         // 先记账再判取消：已产出的字符数要如实统计（P4-C 会用它估算节省量）
                         cancellation.countProduced(piece);
@@ -523,11 +529,24 @@ public class TripStreamService {
     }
 
     private void recordDisconnected(Long userId, Long tripId, int durationMs, StreamCancellation cancellation) {
+        // P4-C：用「同类请求（同 stage）历史 completion_tokens 的均值」估算这次本来会产出多少。
+        // 中断时拿不到 usage，这是唯一有依据的估法 —— 拿不到均值就如实写「无法计算」
+        String summary = cancellation.interruptionSummary(safeAvgCompletionTokens());
         aiLogService.recordStage(new AiStageRecord(userId, tripId, AiStageRecord.STAGE_COPY,
                 null, null, null, null, durationMs, false,
-                AiErrorCode.CLIENT_DISCONNECTED, cancellation.interruptionSummary()));
+                AiErrorCode.CLIENT_DISCONNECTED, summary));
         // 这行日志就是手册验收 3 要 grep 的那句
-        log.info("客户端断开，已中断生成：{}", cancellation.interruptionSummary());
+        log.info("客户端断开，已中断生成：{}", summary);
+    }
+
+    /** 中断节省估算的分母；查不到就返回 null（宁可不估，也不编） */
+    private Integer safeAvgCompletionTokens() {
+        try {
+            return aiLogService.avgCompletionTokens(AiStageRecord.STAGE_COPY, null);
+        } catch (Exception e) {
+            log.debug("取中断节省估算均值失败，本次不估算：{}", e.getMessage());
+            return null;
+        }
     }
 
     private void completeQuietly(SseEmitter emitter) {

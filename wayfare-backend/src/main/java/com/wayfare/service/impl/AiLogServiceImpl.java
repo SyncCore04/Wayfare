@@ -12,6 +12,7 @@ import com.wayfare.trip.AiStageRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -45,11 +46,22 @@ public class AiLogServiceImpl implements AiLogService {
     /** 单价配置键前缀，与 db/schema-trip.sql 的初始数据一致 */
     private static final String PRICE_KEY_PREFIX = "llm.price.";
 
+    /** 输入单价键后缀（P4-C）：llm.price.{provider}-input */
+    private static final String PRICE_INPUT_SUFFIX = "-input";
+
+    /** 输出单价键后缀（P4-C）：llm.price.{provider}-output */
+    private static final String PRICE_OUTPUT_SUFFIX = "-output";
+
     /** 百万：单价的口径单位 */
     private static final BigDecimal MILLION = new BigDecimal("1000000");
 
-    /** 成本保留 6 位小数，够表达 0.000001 元级的小额调用 */
-    private static final int COST_SCALE = 6;
+    /**
+     * 成本保留 4 位小数（P4-C）。
+     *
+     * <p>手册口径：单次成本是「分级」数字，2 位不够（0.0033 会被抹成 0.00），
+     * 4 位足够表达 0.0001 元级；再多只是把浮点噪声当精度。
+     */
+    private static final int COST_SCALE = 4;
 
     /** 失败率保留 4 位小数 */
     private static final int RATE_SCALE = 4;
@@ -156,7 +168,10 @@ public class AiLogServiceImpl implements AiLogService {
             Long totalTokens = toLong(row.get("totalTokens"));
             long callCount = toLongOrZero(row.get("callCount"));
 
-            BigDecimal providerCost = estCost(provider, totalTokens == null ? null : totalTokens.intValue());
+            // P4-C：按输入/输出分别计价（厂商两侧单价通常不同，混在一起算会偏）
+            BigDecimal providerCost = estCost(provider,
+                    promptTokens == null ? null : promptTokens.intValue(),
+                    completionTokens == null ? null : completionTokens.intValue());
 
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("provider", provider);
@@ -232,17 +247,172 @@ public class AiLogServiceImpl implements AiLogService {
 
     @Override
     public BigDecimal estCost(String provider, Integer tokens) {
-        if (provider == null || tokens == null || tokens <= 0) {
+        if (tokens == null || tokens <= 0) {
             return null;
         }
-        Integer price = sysConfigService.getInt(PRICE_KEY_PREFIX + provider, 0);
-        // 0（或负数）表示「未配置单价」—— 返回 null 而不是 0 元
-        if (price == null || price <= 0) {
+        // 粗算：把 tokens 当作输入 token。要精确算（输入输出不同价）请用三参重载
+        return estCost(provider, tokens, null);
+    }
+
+    @Override
+    public BigDecimal estCost(String provider, Integer promptTokens, Integer completionTokens) {
+        if (provider == null) {
             return null;
         }
-        return BigDecimal.valueOf(price)
-                .multiply(BigDecimal.valueOf(tokens))
+        BigDecimal inputPrice = priceOf(provider, PRICE_INPUT_SUFFIX);
+        BigDecimal outputPrice = priceOf(provider, PRICE_OUTPUT_SUFFIX);
+        if (inputPrice == null || outputPrice == null) {
+            // 任一侧没配就不给数字 —— 「只算一半」的成本比没有成本更容易骗人
+            return null;
+        }
+        BigDecimal prompt = promptTokens == null ? BigDecimal.ZERO : BigDecimal.valueOf(promptTokens);
+        BigDecimal completion = completionTokens == null ? BigDecimal.ZERO : BigDecimal.valueOf(completionTokens);
+        if (prompt.signum() == 0 && completion.signum() == 0) {
+            return null;
+        }
+        return prompt.multiply(inputPrice)
+                .add(completion.multiply(outputPrice))
                 .divide(MILLION, COST_SCALE, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * 读某厂商某一侧的单价，两级回落（见接口注释）。
+     *
+     * @param kind {@link #PRICE_INPUT_SUFFIX} 或 {@link #PRICE_OUTPUT_SUFFIX}
+     * @return 单价（元/百万 token）；未配置返回 null
+     */
+    private BigDecimal priceOf(String provider, String kind) {
+        BigDecimal price = sysConfigService.getDecimal(PRICE_KEY_PREFIX + provider + kind);
+        if (price != null) {
+            return price;
+        }
+        // 回落 P2-C 的旧键：整数、输入输出同价。留着它，旧部署升级后不会突然算不出成本
+        Integer legacy = sysConfigService.getInt(PRICE_KEY_PREFIX + provider, 0);
+        return (legacy == null || legacy <= 0) ? null : BigDecimal.valueOf(legacy);
+    }
+
+    @Override
+    public Map<String, Object> breakdownByTrip(Long tripId) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("tripId", tripId);
+        if (tripId == null) {
+            result.put("stages", List.of());
+            result.put("totalTokens", null);
+            result.put("estCost", null);
+            return result;
+        }
+
+        List<Map<String, Object>> rows = aiGenerationLogMapper.sumTokensGroupByStage(tripId);
+        List<Map<String, Object>> stages = new ArrayList<>(rows.size());
+        for (Map<String, Object> row : rows) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("stage", row.get("stage"));
+            item.put("promptTokens", toLong(row.get("promptTokens")));
+            item.put("completionTokens", toLong(row.get("completionTokens")));
+            item.put("tokens", toLong(row.get("totalTokens")));
+            item.put("durationMs", toLong(row.get("durationMs")));
+            item.put("callCount", toLongOrZero(row.get("callCount")));
+            stages.add(item);
+        }
+        result.put("stages", stages);
+
+        // 成本必须按厂商算（单价是每家一套），所以走 provider 维度的聚合，
+        // 而不是拿 stages 里的 token 去乘某一个单价
+        Map<String, Object> byProvider =
+                aggregateTokens(aiGenerationLogMapper.sumTokensGroupByProviderForTrip(tripId));
+        result.put("totalTokens", byProvider.get("totalTokens"));
+        result.put("estCost", byProvider.get("estCost"));
+        return result;
+    }
+
+    @Override
+    public Integer avgCompletionTokens(String stage, String provider) {
+        if (!StringUtils.hasText(stage)) {
+            return null;
+        }
+        Double avg = aiGenerationLogMapper.avgCompletionTokens(stage, provider);
+        // 没有历史样本时返回 null：宁可不估，也不编一个数字
+        return avg == null ? null : (int) Math.round(avg);
+    }
+
+    @Override
+    public Map<String, Object> generationStats(LocalDate from, LocalDate to) {
+        LocalDateTime start = from.atStartOfDay();
+        LocalDateTime end = to.plusDays(1).atStartOfDay();
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        Map<String, Object> overview = aiGenerationLogMapper.statsOverview(start, end);
+
+        long totalCount = toLongOrZero(overview.get("totalCount"));
+        long successCount = toLongOrZero(overview.get("successCount"));
+        // 一次生成写多条阶段日志，所以「生成次数」必须用 DISTINCT trip_id，
+        // 拿 COUNT(*) 会把它放大 5~7 倍 —— 这个数字要上简历，不能错
+        long tripCount = toLongOrZero(overview.get("tripCount"));
+        Long totalTokens = toLong(overview.get("totalTokens"));
+
+        result.put("totalCount", totalCount);
+        result.put("successCount", successCount);
+        result.put("successRate", rate(successCount, totalCount));
+        result.put("tripCount", tripCount);
+        result.put("avgDurationMs", toLong(overview.get("avgDurationMs")));
+        result.put("p95DurationMs", aiGenerationLogMapper.p95DurationMs(start, end));
+        result.put("totalTokens", totalTokens);
+        result.put("avgTokensPerTrip", tripCount == 0 || totalTokens == null
+                ? null
+                : BigDecimal.valueOf(totalTokens).divide(BigDecimal.valueOf(tripCount), 1, RoundingMode.HALF_UP));
+
+        // 成本按厂商算（单价每家一套），再摊到每次生成
+        Map<String, Object> byProvider = aggregateTokens(
+                aiGenerationLogMapper.sumTokensGroupByProviderInRange(start, end));
+        BigDecimal totalCost = (BigDecimal) byProvider.get("estCost");
+        result.put("totalEstCost", totalCost);
+        result.put("avgCostPerTrip", totalCost == null || tripCount == 0
+                ? null
+                : totalCost.divide(BigDecimal.valueOf(tripCount), COST_SCALE, RoundingMode.HALF_UP));
+
+        result.put("stageBreakdown", buildStageBreakdown(start, end));
+        result.put("mapModeBreakdown", buildMapModeBreakdown(start, end));
+        result.put("topErrors", topErrors(from, to, 10));
+        return result;
+    }
+
+    private List<Map<String, Object>> buildStageBreakdown(LocalDateTime start, LocalDateTime end) {
+        List<Map<String, Object>> rows = aiGenerationLogMapper.statsByStage(start, end);
+        List<Map<String, Object>> result = new ArrayList<>(rows.size());
+        for (Map<String, Object> row : rows) {
+            long total = toLongOrZero(row.get("total"));
+            long success = toLongOrZero(row.get("successCount"));
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("stage", row.get("stage"));
+            item.put("total", total);
+            item.put("avgTokens", toLong(row.get("avgTokens")));
+            item.put("avgDurationMs", toLong(row.get("avgDurationMs")));
+            item.put("successRate", rate(success, total));
+            result.add(item);
+        }
+        return result;
+    }
+
+    private List<Map<String, Object>> buildMapModeBreakdown(LocalDateTime start, LocalDateTime end) {
+        List<Map<String, Object>> rows = aiGenerationLogMapper.statsByMapMode(start, end);
+        List<Map<String, Object>> result = new ArrayList<>(rows.size());
+        for (Map<String, Object> row : rows) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("mapMode", row.get("mapMode"));
+            item.put("count", toLongOrZero(row.get("cnt")));
+            item.put("avgDurationMs", toLong(row.get("avgDurationMs")));
+            result.add(item);
+        }
+        return result;
+    }
+
+    /** 比率：分母为 0 返回 null —— 「没跑过」和「全失败」不是一回事 */
+    private static BigDecimal rate(long numerator, long denominator) {
+        if (denominator == 0) {
+            return null;
+        }
+        return BigDecimal.valueOf(numerator)
+                .divide(BigDecimal.valueOf(denominator), RATE_SCALE, RoundingMode.HALF_UP);
     }
 
     // ==================== 内部 ====================

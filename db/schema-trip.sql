@@ -140,8 +140,22 @@ INSERT INTO sys_config (config_key, config_value, value_type, group_name, descri
 -- 0 表示「未配置」：此时 AiLogService.estCost 返回 null 而不是 0 ——
 -- 成本是简历/答辩上会被追问的数字，宁可显示「未配置」也不能编一个看起来合理的值。
 -- （P7-B 的量化指标必须来自实测，见交接文档第 9 节。）
-('llm.price.glm',       '0',             'INT',    'llm', '智谱 GLM 单价（元/百万token）。0=未配置，estCost 将返回 null；请按官网报价填写', 0),
-('llm.price.deepseek',  '0',             'INT',    'llm', 'DeepSeek 单价（元/百万token）。0=未配置，estCost 将返回 null；请按官网报价填写', 0);
+--
+-- 【P4-C 起：输入/输出分开计价】
+-- 厂商的输入价与输出价通常不同（输出价往往贵 2~4 倍），混在一起算会明显偏低。
+-- 所以新增 -input / -output 两个键，用 STRING 存小数字符串（如 '0.3'、'1.5'）——
+-- 用 INT 会把 0.3 取整成 0，直接变成「未配置」。
+-- 读取优先级：{provider}-input/-output  →  回落旧的 {provider}（整数，视同输入输出同价）。
+-- 旧的 llm.price.glm / llm.price.deepseek 保留不删，免得旧部署一升级就算不出成本。
+('llm.price.qwen-input',      '0', 'STRING', 'llm', 'Qwen 输入单价（元/百万token，支持小数如 0.3）。0 或缺失=未配置，estCost 返回 null；按阿里云百炼官网报价填', 0),
+('llm.price.qwen-output',     '0', 'STRING', 'llm', 'Qwen 输出单价（元/百万token，支持小数）。同上', 0),
+('llm.price.glm-input',       '0', 'STRING', 'llm', '智谱 GLM 输入单价（元/百万token，支持小数）。同上', 0),
+('llm.price.glm-output',      '0', 'STRING', 'llm', '智谱 GLM 输出单价（元/百万token，支持小数）。同上', 0),
+('llm.price.deepseek-input',  '0', 'STRING', 'llm', 'DeepSeek 输入单价（元/百万token，支持小数）。同上', 0),
+('llm.price.deepseek-output', '0', 'STRING', 'llm', 'DeepSeek 输出单价（元/百万token，支持小数）。同上', 0),
+-- 兼容保留：输入输出同价的单一价（P2-C 的旧键），仅在上面 6 个键都没配时兜底
+('llm.price.glm',       '0',             'INT',    'llm', '【兼容保留】GLM 单一价（输入输出同价）。优先读 -input/-output；0=未配置', 0),
+('llm.price.deepseek',  '0',             'INT',    'llm', '【兼容保留】DeepSeek 单一价（输入输出同价）。优先读 -input/-output；0=未配置', 0);
 
 -- ---------- 组 map：地图相关开关 ----------
 -- map.enabled 默认 false：没有百度地图 AK 也能全功能开发。

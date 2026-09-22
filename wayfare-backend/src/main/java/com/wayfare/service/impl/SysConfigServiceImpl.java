@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -112,6 +113,20 @@ public class SysConfigServiceImpl implements SysConfigService {
     public boolean getBool(String key, boolean fallback) {
         Boolean value = getBool(key);
         return value != null ? value : fallback;
+    }
+
+    @Override
+    public BigDecimal getDecimal(String key) {
+        String raw = get(key);
+        if (!StringUtils.hasText(raw)) return null;
+        try {
+            BigDecimal value = new BigDecimal(raw.trim());
+            // ≤0 一律按「未配置」处理：与成本计算的既有口径一致（未配置返回 null，不是 0 元）
+            return value.signum() <= 0 ? null : value;
+        } catch (NumberFormatException e) {
+            log.warn("sys_config 的 {} 值 '{}' 不是合法小数，本次按未配置处理", key, raw);
+            return null;
+        }
     }
 
     @Override

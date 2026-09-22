@@ -1,0 +1,69 @@
+package com.wayfare.controller;
+
+import com.wayfare.common.exception.BusinessException;
+import com.wayfare.common.result.Result;
+import com.wayfare.common.result.ResultCode;
+import com.wayfare.security.UserContext;
+import com.wayfare.service.AiLogService;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.time.LocalDate;
+import java.util.Map;
+
+/**
+ * 生成统计接口（P4-C）—— 后台看板的数据源，P6 直接对接。
+ *
+ * <p>数据全部来自 {@code ai_generation_log}（必要时 join {@code trip} 取地图模式），
+ * <b>不做二次加工</b>：这个接口的价值就是「返回的数字与日志表逐行相加一致」，
+ * 任何「顺手修一下」都会让它失去作为证据的资格。
+ *
+ * <p>路径只写应用内路径 {@code /admin/generation} —— {@code server.servlet.context-path}
+ * 已经是 {@code /api}，再写一遍会变成 {@code /api/api/...} 并被当成静态资源返回 500
+ * （P3-F 联调踩过这个坑，见 MEMORY.md）。
+ */
+@RestController
+@RequestMapping("/admin/generation")
+public class AdminGenerationController {
+
+    /** 默认统计窗口：最近 7 天（含今天） */
+    private static final int DEFAULT_WINDOW_DAYS = 7;
+
+    private final AiLogService aiLogService;
+
+    public AdminGenerationController(AiLogService aiLogService) {
+        this.aiLogService = aiLogService;
+    }
+
+    /**
+     * 生成统计总览：{@code GET /api/admin/generation/stats?from=&to=}
+     *
+     * <p>两个参数都可省略：{@code to} 默认今天，{@code from} 默认 {@code to} 往前 7 天。
+     * 日期格式 {@code yyyy-MM-dd}，<b>窗口是左闭右闭</b>（含 {@code to} 当天全天）——
+     * 接口层说「到 9 月 22 日」就应该包含 22 日，右开区间会让用户少看一天数据。
+     *
+     * @return 见 {@link AiLogService#generationStats} 的返回结构说明
+     */
+    @GetMapping("/stats")
+    public Result<Map<String, Object>> stats(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        checkAdmin();
+
+        LocalDate end = to == null ? LocalDate.now() : to;
+        LocalDate start = from == null ? end.minusDays(DEFAULT_WINDOW_DAYS - 1L) : from;
+        if (start.isAfter(end)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "开始日期不能晚于结束日期");
+        }
+        return Result.success(aiLogService.generationStats(start, end));
+    }
+
+    private void checkAdmin() {
+        if (!UserContext.isAdmin()) {
+            throw new BusinessException(ResultCode.FORBIDDEN);
+        }
+    }
+}

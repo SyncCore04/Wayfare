@@ -41,6 +41,7 @@ class AiLogServiceTest {
 
     @Autowired private AiLogService aiLogService;
     @Autowired private AiGenerationLogMapper aiGenerationLogMapper;
+    @Autowired private com.wayfare.mapper.TripMapper tripMapper;
     @Autowired private com.wayfare.mapper.PoiCacheMapper poiCacheMapper;
     @Autowired private SysConfigService sysConfigService;
 
@@ -270,6 +271,188 @@ class AiLogServiceTest {
         assertNotNull(loaded.getFetchedAt());
         assertNotNull(loaded.getExpiresAt());
         assertNull(loaded.getRating(), "未提供的评分仍应为 null，不被写成 0");
+    }
+
+    // ==================== P4-C · 成本与中断的精细化记录 ====================
+
+    @Test
+    @DisplayName("P4-C：输入输出分开计价（1.5 元输入 / 4.5 元输出 每百万）")
+    void dualPriceCostIsCorrect() {
+        setPrice("llm.price.glm-input", "1.5");
+        setPrice("llm.price.glm-output", "4.5");
+
+        // 1000 × 1.5 / 1e6 = 0.0015
+        // 2000 × 4.5 / 1e6 = 0.009
+        BigDecimal cost = aiLogService.estCost("glm", 1000, 2000);
+
+        assertEquals(0, new BigDecimal("0.0105").compareTo(cost), "实际 " + cost);
+    }
+
+    @Test
+    @DisplayName("P4-C：只配一侧单价时返回 null —— 缺一半的成本比没有成本更容易骗人")
+    void partialPriceYieldsNull() {
+        setPrice("llm.price.glm-input", "1.5");
+        setPrice("llm.price.glm-output", "0");
+        setPrice("llm.price.glm", "0");
+
+        assertNull(aiLogService.estCost("glm", 1000, 2000));
+    }
+
+    @Test
+    @DisplayName("P4-C：新键没配时回落到 P2-C 的旧单一价（输入输出同价）")
+    void fallsBackToLegacySinglePrice() {
+        setPrice("llm.price.glm-input", "0");
+        setPrice("llm.price.glm-output", "0");
+        setPrice("llm.price.glm", "2");
+
+        // (1000 + 2000) × 2 / 1e6 = 0.006
+        BigDecimal cost = aiLogService.estCost("glm", 1000, 2000);
+
+        assertEquals(0, new BigDecimal("0.006").compareTo(cost), "实际 " + cost);
+    }
+
+    @Test
+    @DisplayName("P4-C：单价支持小数（旧 INT 键会把 0.3 取整成 0 = 未配置）")
+    void priceAcceptsDecimal() {
+        setPrice("llm.price.qwen-input", "0.3");
+        setPrice("llm.price.qwen-output", "1.2");
+
+        // 10000 × 0.3 / 1e6 = 0.003；10000 × 1.2 / 1e6 = 0.012 → 0.015
+        BigDecimal cost = aiLogService.estCost("qwen", 10000, 10000);
+
+        assertEquals(0, new BigDecimal("0.015").compareTo(cost), "实际 " + cost);
+    }
+
+    @Test
+    @DisplayName("P4-C 验收 4：按 trip 分阶段拆解 token 与耗时，且按管线顺序排列")
+    void breakdownByTripListsStagesInPipelineOrder() {
+        setPrice("llm.price.glm-input", "1");
+        setPrice("llm.price.glm-output", "1");
+
+        Long tripId = 777_001L;
+        recordTrip(tripId, AiStageRecord.STAGE_COMPOSE, 1000, 2000, true);
+        recordTrip(tripId, AiStageRecord.STAGE_PARSE, 100, 50, true);
+        recordTrip(tripId, AiStageRecord.STAGE_COPY, 300, 700, true);
+        // 别的行程不能算进来
+        recordTrip(777_002L, AiStageRecord.STAGE_PARSE, 9999, 9999, true);
+
+        Map<String, Object> bd = aiLogService.breakdownByTrip(tripId);
+
+        assertEquals(tripId, bd.get("tripId"));
+        // (100+50) + (1000+2000) + (300+700) = 4150
+        assertEquals(4150L, bd.get("totalTokens"), "只应统计本行程");
+        // 1400×1/1e6 + 2750×1/1e6 = 0.00415 → 4 位小数 0.0042
+        assertEquals(0, new BigDecimal("0.0042").compareTo((BigDecimal) bd.get("estCost")),
+                "实际 " + bd.get("estCost"));
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> stages = (List<Map<String, Object>>) bd.get("stages");
+        assertEquals(3, stages.size());
+        // 必须是管线顺序，不是 MySQL 的任意顺序
+        assertEquals(AiStageRecord.STAGE_PARSE, stages.get(0).get("stage"));
+        assertEquals(AiStageRecord.STAGE_COMPOSE, stages.get(1).get("stage"));
+        assertEquals(AiStageRecord.STAGE_COPY, stages.get(2).get("stage"));
+        assertEquals(3000L, stages.get(1).get("tokens"), "COMPOSE 的 1000+2000");
+        assertEquals(100L, stages.get(1).get("durationMs"), "三条都是 100ms");
+    }
+
+    @Test
+    @DisplayName("P4-C 验收 3：中断节省的分母取同类成功请求的 completion_tokens 均值")
+    void avgCompletionTokensUsesSuccessSamplesOnly() {
+        record(TEST_USER_ID, AiStageRecord.STAGE_COPY, 100, 1000, true, null, null);
+        record(TEST_USER_ID, AiStageRecord.STAGE_COPY, 100, 3000, true, null, null);
+        // 失败记录的 token 为 null，不该把均值拉低
+        record(TEST_USER_ID, AiStageRecord.STAGE_COPY, null, null, false, AiErrorCode.LLM_TIMEOUT, "x");
+
+        assertEquals(2000, aiLogService.avgCompletionTokens(AiStageRecord.STAGE_COPY, "glm"));
+        // 没跑过的阶段 → null（宁可不估，也不编）
+        assertNull(aiLogService.avgCompletionTokens("NOT_A_STAGE", null));
+    }
+
+    @Test
+    @DisplayName("P4-C 验收 1：stats 的数字与日志表手工核对一致（用增量法，对库内既有数据免疫）")
+    void generationStatsMatchesRawLogs() {
+        setPrice("llm.price.glm-input", "2");
+        setPrice("llm.price.glm-output", "2");
+
+        LocalDate today = LocalDate.now();
+        long countBefore = longOf(aiLogService.generationStats(today, today).get("totalCount"));
+        long tokensBefore = longOf(aiLogService.generationStats(today, today).get("totalTokens"));
+
+        Long tripId = 777_003L;
+        recordTrip(tripId, AiStageRecord.STAGE_PARSE, 100, 50, true);
+        recordTrip(tripId, AiStageRecord.STAGE_COMPOSE, 1000, 2000, true);
+        recordTrip(tripId, AiStageRecord.STAGE_COMPOSE, null, null, false);
+
+        Map<String, Object> stats = aiLogService.generationStats(today, today);
+
+        assertEquals(countBefore + 3, longOf(stats.get("totalCount")), "条数增量应为 3");
+        assertEquals(tokensBefore + 3150L, longOf(stats.get("totalTokens")), "(100+50)+(1000+2000)");
+        assertNotNull(stats.get("p95DurationMs"));
+        assertNotNull(stats.get("avgDurationMs"));
+
+        // 阶段拆解：COMPOSE 两条（1 成功 1 失败）→ 成功率 0.5
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> stageBreakdown = (List<Map<String, Object>>) stats.get("stageBreakdown");
+        Map<String, Object> compose = findStage(stageBreakdown, AiStageRecord.STAGE_COMPOSE);
+        assertEquals(2L, compose.get("total"));
+        assertEquals(0, new BigDecimal("0.5000").compareTo((BigDecimal) compose.get("successRate")),
+                "实际 " + compose.get("successRate"));
+
+        assertNotNull(stats.get("mapModeBreakdown"));
+        assertNotNull(stats.get("topErrors"));
+    }
+
+    @Test
+    @DisplayName("P4-C：stats 的 mapModeBreakdown 能按地图模式分组（join trip 取 map_mode）")
+    void generationStatsBreaksDownByMapMode() {
+        // 造一条带地图模式的行程，让 join 有东西可对
+        com.wayfare.entity.Trip trip = new com.wayfare.entity.Trip();
+        trip.setUserId(TEST_USER_ID);
+        trip.setRawInput("P4-C stats 测试");
+        trip.setStatus(1);
+        trip.setMapMode("VERIFIED");
+        tripMapper.insert(trip);
+
+        recordTrip(trip.getId(), AiStageRecord.STAGE_ROUTE, 10, 10, true);
+
+        Map<String, Object> stats = aiLogService.generationStats(LocalDate.now(), LocalDate.now());
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rows = (List<Map<String, Object>>) stats.get("mapModeBreakdown");
+        boolean found = rows.stream().anyMatch(r -> "VERIFIED".equals(r.get("mapMode")));
+        assertTrue(found, "mapModeBreakdown 应含 VERIFIED，实际 = " + rows);
+    }
+
+    @Test
+    @DisplayName("P4-C：窗口内没有数据时比率返回 null，不返回 0（「没跑过」≠「全失败」）")
+    void emptyWindowYieldsNullRates() {
+        // 用一个绝不会有数据的未来窗口
+        LocalDate far = LocalDate.now().plusYears(5);
+
+        Map<String, Object> stats = aiLogService.generationStats(far, far);
+
+        assertEquals(0L, longOf(stats.get("totalCount")));
+        assertNull(stats.get("successRate"), "没有数据时成功率必须是 null，不是 0");
+        assertNull(stats.get("avgTokensPerTrip"));
+        assertNull(stats.get("avgCostPerTrip"));
+    }
+
+    // ==================== 私有 ====================
+
+    private void setPrice(String key, String value) {
+        sysConfigService.set(key, value, 0L);
+    }
+
+    /** 带 tripId 的阶段记录（P4-C 的拆解与 stats 都按 trip 归集） */
+    private void recordTrip(Long tripId, String stage, Integer prompt, Integer completion, boolean success) {
+        aiLogService.recordStage(new AiStageRecord(TEST_USER_ID, tripId, stage, "glm", "glm-4-flash",
+                prompt, completion, 100, success,
+                success ? null : AiErrorCode.LLM_TIMEOUT, success ? null : "测试用失败"));
+    }
+
+    private static long longOf(Object value) {
+        return value instanceof Number n ? n.longValue() : 0L;
     }
 
     private Map<String, Object> findStage(List<Map<String, Object>> rows, String stage) {

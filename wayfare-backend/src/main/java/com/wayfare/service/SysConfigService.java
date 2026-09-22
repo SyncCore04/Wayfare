@@ -48,6 +48,18 @@ public interface SysConfigService {
     boolean getBool(String key, boolean fallback);
 
     /**
+     * 读小数配置（P4-C）。
+     *
+     * <p>为什么需要它：{@code sys_config.config_value} 是 VARCHAR，而<b>大模型单价是小数</b>
+     * （例如 0.5 元/百万 token）—— 用 {@link #getInt} 读会直接判为非法值。
+     * 单价必须精确，不能取整，所以单独开一个用 {@link BigDecimal} 解析的读法。
+     *
+     * <p>缺失、非法、或 ≤0 一律返回 null（≤0 视作「未配置」，与成本计算的既有口径一致：
+     * 未配置就是 null，绝不返回 0 元）。
+     */
+    java.math.BigDecimal getDecimal(String key);
+
+    /**
      * 写配置并立即失效缓存。
      *
      * @param operatorId 操作人ID，写入 updated_by；后台改的传管理员ID，系统初始值传 0

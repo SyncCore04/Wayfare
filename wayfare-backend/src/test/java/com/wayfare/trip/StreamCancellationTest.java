@@ -103,19 +103,49 @@ class StreamCancellationTest {
     }
 
     @Test
-    @DisplayName("中断说明：如实报字符数，且不编造 token 数字")
-    void interruptionSummary() {
+    @DisplayName("P4-C 中断说明：无同类样本时如实写「无法计算」，不编节省数字")
+    void interruptionSummaryWithoutSample() {
         StreamCancellation c = new StreamCancellation();
         c.countProduced("一二三四五");
         c.markCancelled("客户端断开（连接已结束）");
 
-        String msg = c.interruptionSummary();
+        String msg = c.interruptionSummary(null);
 
         assertNotNull(msg);
+        // 中断时拿不到 usage → 如实写「未知」，不拿字符数换算成 token
+        assertTrue(msg.contains("已产出 token 数未知"), msg);
+        assertTrue(msg.contains("按均值估算本次节省无法计算"), msg);
         assertTrue(msg.contains("已产出 5 字符"), msg);
-        // 中断时拿不到 usage，就不能出现「节省约 N tokens」这种编出来的数字
-        assertFalse(msg.contains("tokens 约"), msg);
         assertTrue(msg.contains("已停止后续生成"), msg);
         assertTrue(msg.contains("客户端断开（连接已结束）"), msg);
+    }
+
+    @Test
+    @DisplayName("P4-C 中断说明：有同类均值时给出「节省约 N tokens」，格式可被 P7 正则提取")
+    void interruptionSummaryWithSample() {
+        StreamCancellation c = new StreamCancellation();
+        c.countProduced("一二三");
+        c.markCancelled("SSE 连接超时（10 分钟）");
+
+        String msg = c.interruptionSummary(3120);
+
+        assertTrue(msg.contains("按均值估算本次节省约 3120 tokens"), msg);
+        // P7 要按这个格式聚合出「单次中断平均节省约 N tokens」，所以格式是契约
+        assertTrue(java.util.regex.Pattern.compile("节省约 (\\d+) tokens").matcher(msg).find(), msg);
+    }
+
+    @Test
+    @DisplayName("P4-C 中断说明：真拿到 usage 时写真实 token 数；空回调不覆盖已有值")
+    void interruptionSummaryWithProducedTokens() {
+        StreamCancellation c = new StreamCancellation();
+        c.markProducedTokens(128);
+        c.markProducedTokens(null);
+        c.markCancelled("客户端断开（连接已结束）");
+
+        String msg = c.interruptionSummary(500);
+
+        assertTrue(msg.contains("已产出 128 tokens"), msg);
+        assertFalse(msg.contains("已产出 token 数未知"), msg);
+        assertEquals(128, c.producedTokens());
     }
 }
