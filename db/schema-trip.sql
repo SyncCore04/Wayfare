@@ -135,7 +135,9 @@ INSERT INTO sys_config (config_key, config_value, value_type, group_name, descri
 ('llm.enabled',         'true',          'BOOL',   'llm', '是否启用大模型能力。关闭后 AI 规划入口不可用', 0),
 ('llm.active-provider', 'qwen',          'STRING', 'llm', '当前使用厂商：qwen | glm | deepseek | mock', 0),
 ('llm.fallback-order',  'qwen,glm,deepseek', 'STRING', 'llm', '降级顺序，逗号分隔。主力不可用时按序切换', 0),
-('llm.timeout-ms',      '90000',         'INT',    'llm', '单次调用超时（毫秒）。行程编排是长输出，默认 90 秒', 0),
+-- 90 秒是早期按短输出（PARSE）估的值，对长输出（CANDIDATE 要吐 10~15 个点位）根本不够：
+-- 实测 qwen 与 glm 都恰好在 90041/90043ms 被掐断，也就是「不是慢，是闸门太低」。
+('llm.timeout-ms',      '240000',         'INT',    'llm', '单次调用超时（毫秒）。长结构化输出（候选/编排）实测需要 90 秒以上，默认给 4 分钟', 0),
 -- 【P4 修复新增】大模型熔断。实测 qwen 的失败是「长输出跑满 timeout 才判定超时」，
 -- 一次白等 90 秒；没有熔断时坏掉的厂商会被反复选中、反复白等（两次真实运行合计白等约 9 分钟）。
 -- 阈值比地图（5）低，因为地图一次失败只损失几百毫秒，大模型一次失败损失一整个 90 秒。

@@ -7,8 +7,10 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.wayfare.common.result.ResultCode;
 import com.wayfare.connector.governance.ExternalHttpClient;
 import com.wayfare.connector.governance.ExternalHttpException;
+import com.wayfare.service.SysConfigService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.StringUtils;
 
 import java.util.Map;
@@ -35,8 +37,27 @@ public abstract class AbstractOpenAiCompatibleProvider implements LlmProvider {
     /** 该厂商的 L1 配置（baseUrl / apiKey / model / temperature / maxTokens） */
     private final LlmProperties.LlmProviderConfig config;
 
-    /** 单次调用超时，来自 application.yml 的 llm.timeout-ms */
+    /** 单次调用超时的 L1 兜底值（application.yml 的 llm.timeout-ms） */
     private final int timeoutMs;
+
+    /**
+     * L2 覆盖入口（`sys_config` 的 `llm.timeout-ms`）。
+     *
+     * <p>🔴 <b>2026-09-23 补：这个键以前是「假可调」的</b> —— 它列在 sys_config 里、
+     * 也出现在后台「连接器管理」页的参数表上，但 Provider 只在<b>构造时</b>读一次 application.yml，
+     * 于是改库改界面<b>都不生效</b>。实测代价：把 `llm.timeout-ms` 从 90000 改成 180000 后重启都没有，
+     * 请求依然在 90 秒被掐断（CANDIDATE 阶段稳定失败），排查时极容易被带偏。
+     *
+     * <p>用 setter 注入而不是构造参数：四个 Provider 子类的构造函数已经很长，
+     * 而这里只需要「能读到 L2」这一件事，不必为此改所有子类签名。
+     * 单测里直接 new 出来的 Provider 拿不到它，自动回落到 L1 值 —— 行为不变。
+     */
+    private SysConfigService sysConfigService;
+
+    @Autowired(required = false)
+    public void setSysConfigService(SysConfigService sysConfigService) {
+        this.sysConfigService = sysConfigService;
+    }
 
     protected AbstractOpenAiCompatibleProvider(ObjectMapper objectMapper,
                                                ExternalHttpClient httpClient,
@@ -47,6 +68,23 @@ public abstract class AbstractOpenAiCompatibleProvider implements LlmProvider {
         this.config = config;
         this.timeoutMs = timeoutMs;
     }
+
+    /**
+     * 本次调用真正生效的超时：L2（sys_config）优先，读不到才用 L1（application.yml）。
+     *
+     * <p>每次调用都读一次，所以改完后台参数<b>不用重启</b>就生效 —— 这才是 P1-A 分层设计里
+     * 「运行期可调」应该有的样子。
+     */
+    protected int effectiveTimeoutMs() {
+        if (sysConfigService == null) {
+            return timeoutMs;
+        }
+        Integer l2 = sysConfigService.getInt(TIMEOUT_CONFIG_KEY, timeoutMs);
+        return l2 == null || l2 <= 0 ? timeoutMs : l2;
+    }
+
+    /** sys_config 里的超时键名（与 schema-trip.sql 的初始行、后台参数表一致） */
+    public static final String TIMEOUT_CONFIG_KEY = "llm.timeout-ms";
 
     // ==================== 子类差异 ====================
 
@@ -112,7 +150,7 @@ public abstract class AbstractOpenAiCompatibleProvider implements LlmProvider {
         String body = buildRequestBody(systemPrompt, userPrompt, false, jsonMode);
         String response;
         try {
-            response = httpClient.postJson(endpointUrl(), buildHeaders(), body, timeoutMs);
+            response = httpClient.postJson(endpointUrl(), buildHeaders(), body, effectiveTimeoutMs());
         } catch (ExternalHttpException e) {
             throw mapException(e);
         }
@@ -160,7 +198,7 @@ public abstract class AbstractOpenAiCompatibleProvider implements LlmProvider {
         }
 
         final boolean[] finished = {false};
-        httpClient.postJsonStream(endpointUrl(), buildHeaders(), body, timeoutMs,
+        httpClient.postJsonStream(endpointUrl(), buildHeaders(), body, effectiveTimeoutMs(),
                 line -> handleStreamLine(line, context, onDelta, finished),
                 () -> {
                     if (!finished[0]) {

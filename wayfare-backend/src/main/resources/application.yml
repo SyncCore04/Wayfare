@@ -143,7 +143,13 @@ llm:
   # （在此之前链上实际只有 GLM 一家可用，因为 DeepSeek 未配 Key —— 等于没有降级。）
   active-provider: qwen
   fallback-order: qwen,glm,deepseek
-  timeout-ms: 90000
+  # 单次调用超时（毫秒）。2026-09-23 由 90000 提到 240000：
+  #   实测 CANDIDATE（要吐 10~15 个点位 + 至少 3 个餐饮的长 JSON）在 90 秒必被掐断，
+  #   而且 qwen 与 glm 都恰好在 90041/90043ms 断掉 —— 说明瓶颈是「长输出需要的时间」，
+  #   不是某个模型的问题。90 秒这个值当初是按短输出（PARSE）估的，对长输出根本不够。
+  # 注意：这是 L1 兜底值；sys_config 的 llm.timeout-ms（L2）优先，改后台参数即时生效、不用重启
+  #（2026-09-23 之前 Provider 只读 L1，那个键是「假可调」的 —— 见 AbstractOpenAiCompatibleProvider）。
+  timeout-ms: 240000
   providers:
     qwen:
       base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
