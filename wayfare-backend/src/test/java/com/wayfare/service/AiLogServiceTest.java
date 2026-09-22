@@ -6,6 +6,7 @@ import com.wayfare.trip.AiErrorCode;
 import com.wayfare.trip.AiStageRecord;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,6 +54,27 @@ class AiLogServiceTest {
     @AfterEach
     void clearConfigCache() {
         sysConfigService.clearCache();
+    }
+
+    /**
+     * 每个用例开始前把所有单价清零 —— 让「未配置单价」成为测试里的<b>显式前提</b>，
+     * 而不是依赖「环境里恰好没配过」。
+     *
+     * <p>🔴 <b>2026-09-23 真实踩到</b>：项目把智谱真实单价（输入 0.8 / 输出 2.8）写进 `sys_config` 之后，
+     * 本类三条成本用例同时挂了 —— 因为它们只清旧的单一价键 {@code llm.price.glm}，
+     * 而 P4-C 的读取顺序是「**{@code -input}/{-output} 优先于**旧单一价」，
+     * 于是「未配置」这个隐含前提悄悄失效，断言从 null 变成了 0.0008。
+     *
+     * <p>结论：生产环境配了真实单价是<b>正确状态</b>，该改的是测试 ——
+     * 任何用例都不该假设「某个配置恰好没配」。这里统一在开始前清零，需要单价的用例再自己设。
+     */
+    @BeforeEach
+    void resetPricesToUnconfigured() {
+        for (String provider : List.of("glm", "qwen", "deepseek")) {
+            sysConfigService.set("llm.price." + provider, "0", 0L);
+            sysConfigService.set("llm.price." + provider + "-input", "0", 0L);
+            sysConfigService.set("llm.price." + provider + "-output", "0", 0L);
+        }
     }
 
     private void setGlmPrice(String value) {
