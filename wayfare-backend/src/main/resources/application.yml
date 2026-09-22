@@ -157,15 +157,18 @@ llm:
     glm:
       base-url: https://open.bigmodel.cn/api/paas/v4
       api-key: "${GLM_API_KEY:}"
-      # 作为**降级备胎**选 glm-4-flash：备胎要的是快和稳（3/3 可用、约 4~15 秒），不是推理强。
-      # glm-4.5-flash 推理更强但单次要 70 秒，当备胎会把用户等待拉长到不可接受。
-      # 它是非推理模型，响应里没有 reasoning_content。
-      # ⚠️ 2026-09-22 实测过 glm-4.6v-flashx：短输出（PARSE）优秀（11.8s / 801 ct，比 qwen 快 4 倍），
-      #    但长输出（CANDIDATE 要吐 20 个候选）completion 撞满 max-tokens 4096 被截断 → 候选池为空。
-      #    所以**不要**换成它，详见 memory/2026-09-22.md。
-      model: glm-4-flash
+      # 2026-09-23 起 = **glm-5.3-flash**（用户指定；账户已充值，按量计费）：
+      #   官方规格 1M 上下文 / 128K 最大输出；定价 输入 ¥0.8、输出 ¥2.8（元/百万 token），
+      #   缓存命中 ¥0.23。按本项目一次完整生成约 1.3 万 token 估算 ≈ **3 分钱/次**。
+      #   它是多模态模型（图片/视频/文本），视觉能力本项目用不上，但单价足够低、输出上限足够高。
+      # ⚠️ max-tokens 从 4096 提到 32768：4096 正是当初 glm-4.6v-flashx 长输出被截断的根因
+      #   （CANDIDATE 要吐 20 个候选，completion 撞满 4096 → finish_reason=length → 候选池为空）。
+      #   模型本身支持 128K 输出，把闸门开到 32768 是让它在长结构化输出上有余地；
+      #   max-tokens 只是上限、不是消耗量，实际按产出 token 计费。
+      # ⚠️ 历史教训保留：**glm-4.6v-flashx 不要当主力**（长输出截断；详见 memory/2026-09-22.md）。
+      model: glm-5.3-flash
       temperature: 0.3
-      max-tokens: 4096
+      max-tokens: 32768
     deepseek:
       base-url: https://api.deepseek.com/v1
       api-key: "${DEEPSEEK_API_KEY:}"
