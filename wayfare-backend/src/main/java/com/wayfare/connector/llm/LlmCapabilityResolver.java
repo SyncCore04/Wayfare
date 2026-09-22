@@ -1,6 +1,7 @@
 package com.wayfare.connector.llm;
 
 import com.wayfare.common.result.ResultCode;
+import com.wayfare.connector.governance.CircuitBreaker;
 import com.wayfare.service.SysConfigService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,13 +40,22 @@ public class LlmCapabilityResolver {
     private final SysConfigService sysConfigService;
     private final LlmProperties llmProperties;
     private final LlmProviderFactory factory;
+    private final CircuitBreaker circuitBreaker;
+
+    /**
+     * 熔断器的配置前缀 —— 读 {@code llm.breaker.*}。
+     * 与地图的 {@code map.breaker.*} 分开，理由见 {@link CircuitBreaker#recordFailure(String, String)}。
+     */
+    private static final String BREAKER_CONFIG_PREFIX = "llm";
 
     public LlmCapabilityResolver(SysConfigService sysConfigService,
                                  LlmProperties llmProperties,
-                                 LlmProviderFactory factory) {
+                                 LlmProviderFactory factory,
+                                 CircuitBreaker circuitBreaker) {
         this.sysConfigService = sysConfigService;
         this.llmProperties = llmProperties;
         this.factory = factory;
+        this.circuitBreaker = circuitBreaker;
     }
 
     /** 解析出本次要用的 Provider（只回答「先用哪一家」） */
@@ -81,6 +91,31 @@ public class LlmCapabilityResolver {
         return ResolvedLlm.primary(provider);
     }
 
+    /**
+     * 记一次「指定厂商调用失败」（供流式路径用）。
+     *
+     * <p><b>为什么流式要单独调这个</b>：{@link #execute} 是给非流式调用做逐家降级的，
+     * 而流式一旦已经把部分内容推给前端，就不能换厂商重来（用户会看到重复文案）——
+     * 所以它绕过 execute、自己直接调 provider。但<b>失败同样必须进熔断</b>，
+     * 否则 COPY 阶段的失败不会被记住，坏厂商照样被反复选中、反复白等。
+     */
+    public void recordProviderFailure(String providerName) {
+        if (providerName == null) {
+            return;
+        }
+        if (circuitBreaker.recordFailure(providerName, BREAKER_CONFIG_PREFIX)) {
+            log.warn("Provider[{}] 连续失败已达阈值，熔断打开（来自流式路径）", providerName);
+        }
+    }
+
+    /** 记一次「指定厂商调用成功」（流式路径用）。真成功才清零 —— 半开的试探成功即恢复 */
+    public void recordProviderSuccess(String providerName) {
+        if (providerName == null) {
+            return;
+        }
+        circuitBreaker.recordSuccess(providerName);
+    }
+
     /** llm.enabled 当前值（L2 → L1 分层读取），诊断接口用它回答「能力开了没有」 */
     public boolean isEnabled() {
         return sysConfigService.getBool(KEY_ENABLED, llmProperties.isEnabled());
@@ -89,11 +124,21 @@ public class LlmCapabilityResolver {
     /**
      * 某家 Provider 现在能不能用。
      *
-     * <p>P1-D 会在这里加「熔断器是否打开」。当前只判断「配没配 Key」——
-     * 这是最常见的不可用原因，也是唯一一个不需要请求就能判断的原因。
+     * <p>两道判断：
+     * <ol>
+     *   <li><b>配没配 Key</b> —— 不需要请求就能判断，也是最常见的不可用原因；</li>
+     *   <li><b>熔断是否打开</b> —— 2026-09-22 补上（类注释里 P1-D 预留的落点）。</li>
+     * </ol>
+     *
+     * <p><b>为什么熔断这一条对 LLM 特别重要</b>：实测 qwen 的失败是「长输出跑满
+     * {@code llm.timeout-ms}（90 秒）才判定超时」，一次白等 90 秒，两次真实运行合计白等约 9 分钟。
+     * 没有熔断时，同一个坏掉的厂商会被反复选中、反复白等 —— 有熔断才会在连续失败后直接跳过它。
      */
     protected boolean isAvailable(LlmProvider provider) {
-        return provider.info().available();
+        if (!provider.info().available()) {
+            return false;
+        }
+        return !circuitBreaker.isOpen(provider.name());
     }
 
     /**
@@ -118,8 +163,11 @@ public class LlmCapabilityResolver {
 
         for (int i = 0; i < chain.size(); i++) {
             ResolvedLlm candidate = chain.get(i);
+            String providerName = candidate.provider().name();
             try {
                 T value = action.apply(candidate.provider());
+                // 真成功才清零计数并关闭熔断（半开时的试探成功，就靠这一行恢复）
+                circuitBreaker.recordSuccess(providerName);
                 if (i > 0 && lastError != null) {
                     // 走到这里说明是「前面失败后才换到这家」的，把降级事实记清楚
                     candidate = ResolvedLlm.fallback(candidate.provider(),
@@ -129,6 +177,11 @@ public class LlmCapabilityResolver {
             } catch (LlmException e) {
                 lastError = e;
                 failures.add(e.getProvider() + ":" + e.getResultCode().name());
+                // 连续失败到阈值就打开熔断，后续请求直接跳过这家 ——
+                // 这是「不再白等一次 90 秒超时」的关键：没有它，坏掉的厂商会被反复选中
+                if (circuitBreaker.recordFailure(providerName, BREAKER_CONFIG_PREFIX)) {
+                    log.warn("Provider[{}] 连续失败已达阈值，熔断打开，后续请求将跳过它", providerName);
+                }
                 if (!e.isFallbackWorthy()) {
                     throw e;
                 }
@@ -177,8 +230,13 @@ public class LlmCapabilityResolver {
             // │ 用户会以为 AI 生成的攻略是真的。宁可让他看到"认证失败请检查 Key"。    │
             // └─────────────────────────────────────────────────────────────────────┘
             if (chain.isEmpty()) {
-                // 把「哪家、为什么」都写进 reason —— 这段文字会被 P3 写进返回的 meta、
-                // 也会被 P6 的监控看板统计，含糊的 reason 等于没写
+                // (c) 全部候选都在熔断中 → 同样不回落 Mock，但给一个能自愈的提示。
+                // 与 (b) 同理：这时候返回假行程，用户会以为 AI 真的生成了。
+                if (anyBreakerOpen(tried)) {
+                    String reason = "所有候选厂商当前都在熔断中（连续失败已达阈值），请稍后重试；已尝试 " + tried;
+                    log.warn("{}", reason);
+                    throw new LlmException(ResultCode.LLM_NOT_AVAILABLE, activeName, reason);
+                }
                 String reason = "所有候选厂商均不可用（" + activeName + "：" + primaryReason
                         + "；降级顺序 " + fallbackCandidates(activeName) + " 也都不行），已回落 Mock";
                 log.warn("{}", reason);
@@ -212,6 +270,17 @@ public class LlmCapabilityResolver {
             chain.add(ResolvedLlm.fallback(provider,
                     primaryReason != null ? primaryReason : "主力之前调用失败，按降级顺序切换"));
         }
+    }
+
+    /** 候选里是否有「配了 Key 但被熔断挡住」的厂商 —— 用来区分「压根没配 Key」与「暂时熔断」 */
+    private boolean anyBreakerOpen(List<String> tried) {
+        for (String name : tried) {
+            LlmProvider p = factory.get(name);
+            if (p != null && p.info().available() && circuitBreaker.isOpen(p.name())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String describe(String activeName) {

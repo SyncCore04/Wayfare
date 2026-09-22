@@ -45,6 +45,9 @@ public class CircuitBreaker {
     private static final String FAIL_KEY_PREFIX = "cb:fail:";
     private static final String OPEN_KEY_PREFIX = "cb:open:";
 
+    /** 大模型的配置前缀（读 {@code llm.breaker.*}）；地图用 {@code map}，见 {@link #recordFailure(String)} */
+    private static final String BREAKER_PREFIX_LLM = "llm";
+
     /** 失败计数的存活时间：超过它没再失败就认为「历史上的连续失败」已经过去 */
     private static final long FAIL_COUNTER_TTL_SECONDS = 3600;
 
@@ -86,8 +89,28 @@ public class CircuitBreaker {
      * @return 本次是否触发了打开（便于日志与诊断）
      */
     public boolean recordFailure(String name) {
-        int threshold = sysConfigService.getInt("map.breaker.fail-threshold", 5);
-        int openSeconds = sysConfigService.getInt("map.breaker.open-seconds", 300);
+        // 默认按地图的配置前缀 —— 保持既有调用方（BaiduMapProvider）的行为不变
+        return recordFailure(name, "map");
+    }
+
+    /**
+     * 记一次失败（P4 修复 · 支持按前缀取阈值）。
+     *
+     * <p><b>为什么要分前缀</b>：地图与大模型的失败特征完全不同 ——
+     * 地图是「请求被拒 / 秒级超时」，一次失败只损失几百毫秒；
+     * 大模型是「长输出跑满 90 秒才判定超时」，<b>一次白等就抵得上几十次地图调用</b>。
+     * 用同一套阈值会让两边的行为都不可控：地图该早点打开、大模型该更早打开。
+     *
+     * @param configPrefix 配置前缀：地图传 {@code map}（读 {@code map.breaker.*}），
+     *                     大模型传 {@code llm}（读 {@code llm.breaker.*}）
+     */
+    public boolean recordFailure(String name, String configPrefix) {
+        // 默认值必须与 db/schema-trip.sql 的初始值一致 ——
+        // 否则「库还没执行过初始化脚本」的部署会跟配置好的部署行为不同，
+        // 而且这种差异不会有任何报错（本次写测试时正是踩在这个默认值上）
+        int defaultThreshold = BREAKER_PREFIX_LLM.equals(configPrefix) ? 3 : 5;
+        int threshold = sysConfigService.getInt(configPrefix + ".breaker.fail-threshold", defaultThreshold);
+        int openSeconds = sysConfigService.getInt(configPrefix + ".breaker.open-seconds", 300);
         try {
             String failKey = FAIL_KEY_PREFIX + name;
             Long count = stringRedisTemplate.opsForValue().increment(failKey);

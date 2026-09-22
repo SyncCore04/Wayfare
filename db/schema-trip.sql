@@ -136,6 +136,11 @@ INSERT INTO sys_config (config_key, config_value, value_type, group_name, descri
 ('llm.active-provider', 'qwen',          'STRING', 'llm', '当前使用厂商：qwen | glm | deepseek | mock', 0),
 ('llm.fallback-order',  'qwen,glm,deepseek', 'STRING', 'llm', '降级顺序，逗号分隔。主力不可用时按序切换', 0),
 ('llm.timeout-ms',      '90000',         'INT',    'llm', '单次调用超时（毫秒）。行程编排是长输出，默认 90 秒', 0),
+-- 【P4 修复新增】大模型熔断。实测 qwen 的失败是「长输出跑满 timeout 才判定超时」，
+-- 一次白等 90 秒；没有熔断时坏掉的厂商会被反复选中、反复白等（两次真实运行合计白等约 9 分钟）。
+-- 阈值比地图（5）低，因为地图一次失败只损失几百毫秒，大模型一次失败损失一整个 90 秒。
+('llm.breaker.fail-threshold', '3',   'INT',    'llm', '连续失败多少次后熔断该厂商（后续请求直接跳过，不再白等超时）', 0),
+('llm.breaker.open-seconds',   '300', 'INT',    'llm', '熔断保持多久（秒）后再放行一次试探；试探成功即恢复', 0),
 -- 【单价留 0 是有意的】单位「元/百万 token」，需按厂商官网实际报价填写。
 -- 0 表示「未配置」：此时 AiLogService.estCost 返回 null 而不是 0 ——
 -- 成本是简历/答辩上会被追问的数字，宁可显示「未配置」也不能编一个看起来合理的值。

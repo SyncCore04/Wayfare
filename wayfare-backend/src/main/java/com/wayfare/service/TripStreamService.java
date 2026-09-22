@@ -457,6 +457,9 @@ public class TripStreamService {
         }
         if (errorRef[0] != null) {
             AiErrorCode code = toAiErrorCode(errorRef[0]);
+            // 流式路径绕过了 llmResolver.execute()，所以失败要单独记进熔断 ——
+            // 否则 COPY 阶段的失败不会被记住，坏厂商会被反复选中、反复白等
+            llmResolver.recordProviderFailure(provider.name());
             aiLogService.recordStage(new AiStageRecord(userId, tripId, AiStageRecord.STAGE_COPY,
                     provider.name(), safeModel(provider), null, null, durationMs, false, code,
                     errorRef[0].getMessage()));
@@ -464,6 +467,7 @@ public class TripStreamService {
                     errorData(code.name(), "文案生成失败（行程已保留，可稍后重试）"));
             return null;
         }
+        llmResolver.recordProviderSuccess(provider.name());
         aiLogService.recordStage(new AiStageRecord(userId, tripId, AiStageRecord.STAGE_COPY,
                 provider.name(), safeModel(provider),
                 usageRef[0] == null ? null : usageRef[0].promptTokens(),
