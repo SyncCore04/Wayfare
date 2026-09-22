@@ -10,7 +10,9 @@ import com.wayfare.entity.Trip;
 import com.wayfare.profile.ProfileOverrides;
 import com.wayfare.security.UserContext;
 import com.wayfare.service.TripService;
+import com.wayfare.service.TripStreamService;
 import com.wayfare.trip.TripOrchestrator;
+import org.springframework.http.MediaType;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -43,10 +46,13 @@ public class TripController {
 
     private final TripOrchestrator orchestrator;
     private final TripService tripService;
+    private final TripStreamService tripStreamService;
 
-    public TripController(TripOrchestrator orchestrator, TripService tripService) {
+    public TripController(TripOrchestrator orchestrator, TripService tripService,
+                          TripStreamService tripStreamService) {
         this.orchestrator = orchestrator;
         this.tripService = tripService;
+        this.tripStreamService = tripStreamService;
     }
 
     /**
@@ -75,6 +81,26 @@ public class TripController {
         resp.setComposeError(o.composeError());
         resp.setMeta(o.meta());
         return Result.success(resp);
+    }
+
+    /**
+     * 流式规划（P4-A）：请求体与 {@link #planSync} 完全相同，响应是 {@code text/event-stream}。
+     *
+     * <p>为什么需要它：同步接口实测一次 194~507 秒（主力模型屡次 90 秒超时后降级），
+     * 浏览器与 axios 的默认超时都等不到。流式版先推 {@code stage} 进度、
+     * 再推 {@code itinerary} 骨架（十几秒即可渲染），最后用 {@code delta} 填文案。
+     *
+     * <p>{@code userId} 必须在<b>请求线程里</b>取：生成跑在独立线程池，
+     * 那里读不到 {@code UserContext} 的 ThreadLocal。
+     */
+    @PostMapping(value = "/plan/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter planStream(@RequestBody TripPlanRequest req) {
+        if (req == null || !StringUtils.hasText(req.getRawInput())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "行程需求不能为空");
+        }
+        Long userId = UserContext.getUserId();
+        boolean useProfile = req.getUseProfile() == null || req.getUseProfile();
+        return tripStreamService.start(userId, req.getRawInput().trim(), useProfile, toOverrides(req));
     }
 
     /**

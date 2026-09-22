@@ -130,10 +130,24 @@ public class TripOrchestrator {
     /**
      * 完整规划（Step1~7）：从用户原话一路走到落库。
      *
-     * @return 编排结果；{@link OrchestrationOutcome#tripId()} 永远非 null（草稿已落库）
+     * <p>不带进度回调的版本，同步接口 {@code /plan/sync} 用它 ——
+     * <b>签名保持不变</b>（手册要求同步接口必须继续可用）。要上报进度用下面那个重载。
      */
     public OrchestrationOutcome orchestrate(Long userId, String rawInput,
                                             boolean useProfile, ProfileOverrides overrides) {
+        return orchestrate(userId, rawInput, useProfile, overrides, TripProgressListener.NOOP);
+    }
+
+    /**
+     * 完整规划 + 阶段进度回调（P4-A 的 SSE 用它）。
+     *
+     * <p>回调是<b>只读的旁观者</b>：编排逻辑与没有回调时完全一致，少报一个事件不会影响结果。
+     *
+     * @return 编排结果；{@link OrchestrationOutcome#tripId()} 永远非 null（草稿已落库）
+     */
+    public OrchestrationOutcome orchestrate(Long userId, String rawInput,
+                                            boolean useProfile, ProfileOverrides overrides,
+                                            TripProgressListener listener) {
         long startMs = System.currentTimeMillis();
         LocalDateTime runStart = LocalDateTime.now();
 
@@ -146,8 +160,12 @@ public class TripOrchestrator {
         boolean profileUsed = profile != null;
 
         try {
+            listener.onStage(AiStageRecord.STAGE_PARSE, TripProgressListener.STATUS_RUNNING,
+                    "正在理解你的需求");
             IntentDTO intent = intentParser.parseIntent(rawInput, profile, overrides, capability);
-            PipelineOutput out = runPipeline(intent, profile, overrides, capability, null);
+            listener.onStage(AiStageRecord.STAGE_PARSE, TripProgressListener.STATUS_DONE,
+                    describeIntent(intent));
+            PipelineOutput out = runPipeline(intent, profile, overrides, capability, null, listener);
 
             if (out.draft() != null) {
                 assembleAndSave(draftTrip, intent, out);
@@ -187,7 +205,8 @@ public class TripOrchestrator {
 
         ResolvedMap capability = mapResolver.resolve();
         UserTravelProfile profile = loadProfile(userId, true);
-        PipelineOutput out = runPipeline(intent, profile, new ProfileOverrides(), capability, feedback);
+        PipelineOutput out = runPipeline(intent, profile, new ProfileOverrides(), capability, feedback,
+                TripProgressListener.NOOP);
 
         if (out.draft() != null) {
             assembleInto(existing, intent, out);
@@ -202,15 +221,29 @@ public class TripOrchestrator {
 
     private PipelineOutput runPipeline(IntentDTO intent, UserTravelProfile profile,
                                        ProfileOverrides overrides, ResolvedMap capability,
-                                       String feedback) {
+                                       String feedback, TripProgressListener listener) {
         // Step2：候选检索
+        listener.onStage(AiStageRecord.STAGE_CANDIDATE, TripProgressListener.STATUS_RUNNING,
+                "正在检索候选点位");
         CandidatePool pool = candidateSearcher.searchCandidates(intent, profile, capability);
+        listener.onStage(AiStageRecord.STAGE_CANDIDATE, TripProgressListener.STATUS_DONE,
+                describePool(pool));
         // Step3：空间预排（起点 = 目的地中心，见 PreOrderResult 的说明）
+        listener.onStage(AiStageRecord.STAGE_PREORDER, TripProgressListener.STATUS_RUNNING,
+                "正在按地理位置预排顺序");
         PreOrderResult preOrder = preOrderService.preOrder(
                 pool.getItems(), intent.getDestLng(), intent.getDestLat());
+        listener.onStage(AiStageRecord.STAGE_PREORDER, TripProgressListener.STATUS_DONE,
+                preOrder.skippedNoCoord()
+                        ? "候选点位缺坐标，保持原顺序（不虚构排序依据）"
+                        : "空间预排完成：已按地理位置排序"
+                                + (preOrder.noCoordCount() > 0
+                                ? "（另有 " + preOrder.noCoordCount() + " 个点缺坐标，按原序追加在末尾）" : ""));
 
         int maxRounds = sysConfigService.getInt(KEY_MAX_REPLAN, DEFAULT_MAX_REPLAN);
         ReplanResult replan;
+        listener.onStage(AiStageRecord.STAGE_COMPOSE, TripProgressListener.STATUS_RUNNING,
+                "正在编排每天的行程");
         if (StringUtils.hasText(feedback)) {
             // 重排入口：直接带反馈编排一版（不再走 replanner 的内部自洽重排，反馈已指定了方向）
             ComposeResult c = composer.compose(intent, pool, preOrder, profile, overrides, capability, feedback);
@@ -227,13 +260,31 @@ public class TripOrchestrator {
         int rounds = replan.replanRounds();
         String composeError = replan.composeError();
 
+        listener.onStage(AiStageRecord.STAGE_COMPOSE, TripProgressListener.STATUS_DONE,
+                draft == null ? "编排未产出可用行程" : describeDraft(draft, rounds));
+        // COMPOSE 与 VALIDATE 在 replanner 内部是交错发生的（校验不过就回喂重排），
+        // 所以这里按「阶段完成时上报」的口径给一条 VALIDATE/DONE，不硬拆 RUNNING 制造假时序
+        listener.onStage(AiStageRecord.STAGE_VALIDATE, TripProgressListener.STATUS_DONE,
+                describeReport(report));
+
         // Step6：事实补全（enrichRoutes）
         if (draft != null) {
+            boolean mapLive = capability != null && capability.mode() != MapMode.ESTIMATED;
+            if (mapLive) {
+                listener.onStage(AiStageRecord.STAGE_ROUTE, TripProgressListener.STATUS_RUNNING,
+                        "正在补全真实距离与时长");
+            } else {
+                // 地图关闭是能力降级不是故障：用 FALLBACK 而不是 error，前端据此显示「估算」角标
+                listener.onStage(AiStageRecord.STAGE_ROUTE, TripProgressListener.STATUS_FALLBACK,
+                        "地图不可用，已切换为估算模式：距离与时长不展示具体数值");
+            }
             enrichRoutes(draft, intent, pool, capability);
             // 补全后重跑校验：路线事实可能改变 BACKTRACK / BUDGET_EXCEED 的结论
             ValidationReport afterRoute = validator.validate(draft, intent, pool, profile, overrides);
             while (afterRoute.hasHigh() && rounds < maxRounds && composeError == null) {
                 rounds++;
+                listener.onStage(AiStageRecord.STAGE_COMPOSE, TripProgressListener.STATUS_RUNNING,
+                        "校验发现" + afterRoute.violations().size() + " 处问题，正在重排第 " + rounds + " 轮");
                 ComposeResult again = composer.compose(intent, pool, preOrder, profile, overrides,
                         capability, afterRoute.toFeedbackText());
                 if (!again.success()) {
@@ -245,11 +296,101 @@ public class TripOrchestrator {
                 afterRoute = validator.validate(draft, intent, pool, profile, overrides);
             }
             report = afterRoute;
+            listener.onStage(AiStageRecord.STAGE_ROUTE, TripProgressListener.STATUS_DONE,
+                    describeRouteFacts(draft));
+            // 降级出口：骨架此刻已完整可用（含事实补全后的重校验），立刻交给上层推送；
+            // 之后的文案生成失败也拿不走这份行程
+            listener.onItinerary(draft);
         }
 
         return new PipelineOutput(intent, pool, draft, report, composeError, rounds,
                 capability == null ? MapMode.ESTIMATED : capability.mode(),
                 resolveModelName(), profile != null);
+    }
+
+    // ==================== P4-A · 阶段文案（给 SSE 的 stage 事件用）====================
+
+    /**
+     * 这些方法只负责把「机器状态」翻译成一句人话。
+     *
+     * <p>刻意不抛异常、不返回 null —— 进度上报是旁路，措辞出问题不该把整条管线带崩，
+     * 所以每个分支都有兜底文案。
+     */
+    private String describeIntent(IntentDTO intent) {
+        if (intent == null) {
+            return "需求已理解";
+        }
+        StringBuilder sb = new StringBuilder("需求已理解：");
+        sb.append(StringUtils.hasText(intent.getDestination()) ? intent.getDestination() : "目的地待确认");
+        if (intent.getDays() != null) {
+            sb.append(" · ").append(intent.getDays()).append(" 天");
+        }
+        if (intent.getNeedConfirm() != null && !intent.getNeedConfirm().isEmpty()) {
+            // 需要用户确认的项照实说，不让「解析成功」掩盖「有信息没给全」
+            sb.append("（待确认：").append(String.join("、", intent.getNeedConfirm())).append("）");
+        }
+        return sb.toString();
+    }
+
+    private String describePool(CandidatePool pool) {
+        if (pool == null) {
+            return "候选点位检索完成";
+        }
+        String base = "候选点位 " + pool.getItems().size() + " 个";
+        if (pool.isShortage()) {
+            base += "（候选不足，已如实上报，不会凭空补点）";
+        }
+        return base;
+    }
+
+    private String describeDraft(TripDraftDTO draft, int rounds) {
+        int days = draft.getDays() == null ? 0 : draft.getDays().size();
+        String s = "行程骨架已生成：" + days + " 天 · " + countItems(draft) + " 个点位";
+        return rounds > 0 ? s + "（回喂重排 " + rounds + " 轮）" : s;
+    }
+
+    private String describeReport(ValidationReport report) {
+        if (report == null) {
+            return "约束校验完成";
+        }
+        int n = report.violations() == null ? 0 : report.violations().size();
+        return n == 0 ? "约束校验通过，没有发现问题" : "约束校验完成：" + n + " 项提示（已尽量重排）";
+    }
+
+    /** 说清「哪些段是实测、哪些是估算」—— 这正是前端角标要显示的东西 */
+    private String describeRouteFacts(TripDraftDTO draft) {
+        int measured = 0;
+        int estimated = 0;
+        if (draft.getDays() != null) {
+            for (TripDraftDTO.DayDraft day : draft.getDays()) {
+                if (day.getItems() == null) {
+                    continue;
+                }
+                for (TripDraftDTO.ItemDraft item : day.getItems()) {
+                    if (item.getDistanceMeters() != null) {
+                        measured++;
+                    } else {
+                        estimated++;
+                    }
+                }
+            }
+        }
+        return estimated == 0
+                ? "事实补全完成：全部 " + measured + " 段为实测数据"
+                : "事实补全完成：实测 " + measured + " 段 / 无实测数据 " + estimated + " 段（不编数字）";
+    }
+
+    private int countItems(TripDraftDTO draft) {
+        if (draft == null || draft.getDays() == null) {
+            return 0;
+        }
+        int n = 0;
+        for (TripDraftDTO.DayDraft day : draft.getDays()) {
+            if (day.getItems() != null) {
+                n += day.getItems().size();
+            }
+        }
+        return n;
     }
 
     // ==================== Step6 · enrichRoutes ====================

@@ -157,7 +157,11 @@ INSERT INTO sys_config (config_key, config_value, value_type, group_name, descri
 ('trip.max-days',           '5',  'INT', 'trip', '单次行程最大天数，超过则提示拆分', 0),
 ('trip.max-candidate',      '20', 'INT', 'trip', '候选点位池上限，控制送入大模型的上下文规模', 0),
 ('trip.max-replan-rounds',  '2',  'INT', 'trip', '约束校验不通过时最多重排轮数。绝不允许死循环', 0),
-('trip.poi-cache-ttl-hours','24', 'INT', 'trip', 'POI 缓存有效期（小时），熔断降级时靠它兜底', 0);
+('trip.poi-cache-ttl-hours','24', 'INT', 'trip', 'POI 缓存有效期（小时），熔断降级时靠它兜底', 0),
+-- SSE 通道超时（P4-A）。手册写的是 5 分钟，但实测一次生成要 194~507 秒（骨架本身 3 次大模型调用，
+-- 主力模型屡次 90 秒超时后降级），5 分钟会把 done 事件掐掉、用户拿不到收尾。
+-- 故默认放宽到 10 分钟，并做成 L2 可调（改完不重启即生效）。
+('trip.sse-timeout-ms',     '600000', 'INT', 'trip', 'SSE 生成通道超时（毫秒）。默认 10 分钟，需大于最坏情况的一次生成耗时', 0);
 
 -- ============================================================
 -- 4. 用户旅行偏好画像表 user_travel_profile（P2-A）
