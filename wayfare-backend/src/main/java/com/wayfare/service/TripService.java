@@ -109,4 +109,19 @@ public interface TripService {
      * @param guideText 生成的文案；传 null 表示「无事可做」（本方法不支持把列清空）
      */
     void updateGuideText(Long tripId, Long userId, String guideText);
+
+    /**
+     * 把行程与已发布的攻略关联起来（P5-B/C 的「发布为攻略」最后一步）。
+     *
+     * <p><b>为什么是「回写」而不是「创建」</b>：手册的流程是
+     * 「复用 P0 的发布链路，把行程摘要 + 文案 + 多图作为 work 内容提交，<b>成功后把返回的 workId 写回 trip</b>」——
+     * 攻略（含图片、分类、标签）由既有的发布接口创建，这里只负责建立那根关联线。
+     * 这样做的好处是发布页的所有既有校验（图片数、分类、内容审核）一条都不用重写。
+     *
+     * <p><b>两个都要校验</b>：行程必须是本人的、攻略也必须是本人的 ——
+     * 否则可以把别人的攻略挂到自己的行程上（或反之），让「AI 生成」角标出现在不属于它的作品上。
+     *
+     * @throws com.wayfare.common.exception.BusinessException 行程/攻略不存在或不属于该用户
+     */
+    void bindWork(Long tripId, Long userId, Long workId);
 }

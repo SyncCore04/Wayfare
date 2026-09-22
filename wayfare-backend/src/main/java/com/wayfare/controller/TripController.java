@@ -222,6 +222,23 @@ public class TripController {
     }
 
     /**
+     * 把行程与已发布的攻略关联（P5-B/C · 「发布为攻略」的最后一步）。
+     *
+     * <p>前端先用既有的 {@code POST /works} 创建攻略（含图片/分类/标签，走 P0 的完整校验），
+     * 拿到 workId 后再调这里建立关联 —— 而不是让后端凭空造一条没有图的攻略。
+     *
+     * <p>关联建立后：卡片上会出现「AI 生成」角标，攻略详情页会出现「完整行程」区块。
+     */
+    @PutMapping("/{id}/publish")
+    public Result<Void> publish(@PathVariable Long id, @RequestBody PublishRequest body) {
+        if (body == null || body.getWorkId() == null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "缺少攻略ID");
+        }
+        tripService.bindWork(id, UserContext.getUserId(), body.getWorkId());
+        return Result.success();
+    }
+
+    /**
      * 逻辑删除行程（置 {@code trip.deleted}）。
      */
     @DeleteMapping("/{id}")
@@ -271,5 +288,13 @@ public class TripController {
 
         public List<Long> getItemIds() { return itemIds; }
         public void setItemIds(List<Long> itemIds) { this.itemIds = itemIds; }
+    }
+
+    /** 发布关联请求体：把行程挂到哪条攻略上 */
+    public static class PublishRequest {
+        private Long workId;
+
+        public Long getWorkId() { return workId; }
+        public void setWorkId(Long workId) { this.workId = workId; }
     }
 }

@@ -46,6 +46,17 @@ export function deleteTrip(id) {
 }
 
 /**
+ * 把行程与已发布的攻略关联（「发布为攻略」的最后一步）。
+ *
+ * 流程是两步：先用既有的 `POST /works` 创建攻略（图片/分类/标签走 P0 的完整校验），
+ * 拿到 workId 后再调这里建立关联 —— 后端不凭空造攻略。
+ * 关联后卡片会出现「AI 生成」角标、详情页会出现「完整行程」区块。
+ */
+export function publishTrip(id, workId) {
+  return request({ url: `/trip/${id}/publish`, method: 'put', data: { workId } })
+}
+
+/**
  * 重排某一天的条目顺序（P5-B 的「上移 / 下移」编辑）。
  *
  * @param {number|string} id 行程ID

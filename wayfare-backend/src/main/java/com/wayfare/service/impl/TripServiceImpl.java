@@ -8,9 +8,11 @@ import com.wayfare.common.result.ResultCode;
 import com.wayfare.entity.Trip;
 import com.wayfare.entity.TripDay;
 import com.wayfare.entity.TripItem;
+import com.wayfare.entity.Work;
 import com.wayfare.mapper.TripDayMapper;
 import com.wayfare.mapper.TripItemMapper;
 import com.wayfare.mapper.TripMapper;
+import com.wayfare.mapper.WorkMapper;
 import com.wayfare.service.TripService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,10 +37,15 @@ public class TripServiceImpl implements TripService {
     private final TripDayMapper tripDayMapper;
     private final TripItemMapper tripItemMapper;
 
-    public TripServiceImpl(TripMapper tripMapper, TripDayMapper tripDayMapper, TripItemMapper tripItemMapper) {
+    /** P5-B/C：关联「发布为攻略」时用来校验攻略归属（跨域依赖，但 Mapper 层很轻，不值得为它再包一层） */
+    private final WorkMapper workMapper;
+
+    public TripServiceImpl(TripMapper tripMapper, TripDayMapper tripDayMapper,
+                           TripItemMapper tripItemMapper, WorkMapper workMapper) {
         this.tripMapper = tripMapper;
         this.tripDayMapper = tripDayMapper;
         this.tripItemMapper = tripItemMapper;
+        this.workMapper = workMapper;
     }
 
     @Override
@@ -152,6 +159,33 @@ public class TripServiceImpl implements TripService {
         Trip patch = new Trip();
         patch.setId(tripId);
         patch.setGuideText(guideText);
+        tripMapper.updateById(patch);
+    }
+
+    @Override
+    @Transactional
+    public void bindWork(Long tripId, Long userId, Long workId) {
+        if (workId == null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "缺少攻略ID");
+        }
+        // ① 行程必须是本人的（与其它方法同一条纪律）
+        Trip existing = tripMapper.selectOne(new LambdaQueryWrapper<Trip>()
+                .eq(Trip::getId, tripId)
+                .eq(Trip::getUserId, userId));
+        if (existing == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "行程不存在");
+        }
+        // ② 攻略也必须是本人的 —— 否则能把别人的攻略挂到自己的行程上，
+        //    让「AI 生成」角标出现在不属于它的作品上
+        Work work = workMapper.selectById(workId);
+        if (work == null || !userId.equals(work.getUserId())) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "攻略不存在");
+        }
+        // ③ 补丁式更新：只动 work_id 一列（updateById 跳过 null 字段），
+        //    不碰行程的其它字段，也不会牵连 trip_day / trip_item
+        Trip patch = new Trip();
+        patch.setId(tripId);
+        patch.setWorkId(workId);
         tripMapper.updateById(patch);
     }
 

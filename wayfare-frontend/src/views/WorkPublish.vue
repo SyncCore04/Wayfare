@@ -110,6 +110,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { uploadImages } from '@/api/file'
 import { createWork, updateWork, getWorkDetail } from '@/api/work'
+import { getTrip, publishTrip } from '@/api/trip'
 import { getAllTags } from '@/api/tag'
 import { getCategoryTree } from '@/api/category'
 
@@ -121,6 +122,9 @@ const submitting = ref(false)
 const allTags = ref([])
 
 const isEdit = computed(() => !!route.params.id)
+
+/** 从 AI 行程发布时带的行程 id（P5-B/C）；编辑模式下不使用 */
+const tripIdFromQuery = computed(() => route.query.tripId || null)
 
 // 分类改为从 GET /categories/tree 拉取（旧版这里写死了 7 个摄影分类，
 // 数据库改了分类前端根本不跟着变 —— 那是 P0 阶段要修掉的假实现之一）
@@ -151,8 +155,33 @@ onMounted(() => {
   fetchCategories()
   if (isEdit.value) {
     fetchWorkData()
+  } else if (tripIdFromQuery.value) {
+    prefillFromTrip()
   }
 })
+
+/**
+ * 从 AI 行程预填（P5-B/C 的「发布为攻略」入口会带 tripId 过来）。
+ *
+ * 只预填「标题 + 描述 + 目的地 + 天数」：图片与分类仍要用户自己选 ——
+ * 封面图是发布页的必填项，而 AI 生成不了图片，硬造一个空封面只会让发布失败。
+ */
+async function prefillFromTrip() {
+  try {
+    const res = await getTrip(tripIdFromQuery.value)
+    const trip = res.data || {}
+    if (!form.title) form.title = trip.title || ''
+    if (!form.description) {
+      // 优先用攻略文案，没有就退回用户的原始需求 —— 总之不留空
+      form.description = trip.guideText || trip.rawInput || ''
+    }
+    if (!form.destination) form.destination = trip.destination || ''
+    if (!form.tripDays) form.tripDays = trip.days || null
+    ElMessage.info('已从你的 AI 行程预填，补上图片与分类即可发布')
+  } catch (e) {
+    // 行程取不到就不预填，用户照常手填
+  }
+}
 
 async function fetchCategories() {
   categoryLoading.value = true
@@ -296,8 +325,19 @@ async function handleSubmit(status = 1) {
       await updateWork(route.params.id, payload)
       ElMessage.success(status === 0 ? '已保存为草稿' : '修改成功')
     } else {
-      await createWork(payload)
+      const res = await createWork(payload)
       ElMessage.success(status === 0 ? '已保存为草稿' : '发布成功')
+      // 从 AI 行程来的：发布成功后建立关联，卡片才会出现「AI 生成」角标、
+      // 详情页才会出现「完整行程」区块。
+      // 关联失败**不回滚发布** —— 攻略本身已经建好了，为一个关联失败把它删掉
+      // 反而会让用户白填一遍表单，所以只提示
+      if (tripIdFromQuery.value && res.data?.id) {
+        try {
+          await publishTrip(tripIdFromQuery.value, res.data.id)
+        } catch (e) {
+          ElMessage.warning('攻略已发布，但与行程的关联失败（详情页可能不显示完整行程）')
+        }
+      }
     }
     router.push('/profile?tab=works')
   } catch (e) {

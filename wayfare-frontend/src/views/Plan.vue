@@ -589,8 +589,19 @@ async function handleSaveOrder(payload) {
   }
 }
 
+/**
+ * 发布为攻略：跳到发布页并带上行程 id。
+ *
+ * 为什么不在这一页直接发：发布要选图片、选分类、填标题，还有内容审核 ——
+ * 那是 P0 发布页已有的完整链路，重写一遍只会多出一堆不一致的校验。
+ * 这里只负责把行程「交接」过去，发布成功后由发布页回调关联接口。
+ */
 function goPublish() {
-  ElMessage.info('发布链路会在 P5-C 接入（需要把行程摘要与文案预填到发布页）')
+  if (!tripId.value) {
+    ElMessage.warning('这条行程还没落库，暂时无法发布')
+    return
+  }
+  router.push({ path: '/publish', query: { tripId: String(tripId.value) } })
 }
 
 function resetAll() {
