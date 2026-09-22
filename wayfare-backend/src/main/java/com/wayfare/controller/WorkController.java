@@ -5,6 +5,7 @@ import com.wayfare.common.exception.BusinessException;
 import com.wayfare.common.result.Result;
 import com.wayfare.common.result.ResultCode;
 import com.wayfare.dto.WorkDTO;
+import com.wayfare.entity.Trip;
 import com.wayfare.entity.Work;
 import com.wayfare.security.UserContext;
 import com.wayfare.service.WorkService;
@@ -46,6 +47,20 @@ public class WorkController {
     public Result<Work> getById(@PathVariable Long id) {
         workService.incrementViewCount(id);
         return Result.success(workService.getById(id));
+    }
+
+    /**
+     * 攻略关联的「完整行程」（P5-C · 详情页的时间轴区块）。
+     *
+     * <p>公开路径（与 {@code /{id}} 同级）—— 行程随攻略一起公开，这正是「发布为攻略」的语义。
+     * 未发布/待审核的攻略拿不到行程；纯图文攻略返回 {@code data: null}（正常状态，不是 404）。
+     *
+     * <p>⚠️ 路径必须在 {@code JwtInterceptor.PUBLIC_PATHS} 里单独加一条：
+     * 白名单用的是 PathPattern 完整匹配，{@code /works/{id:[0-9]+}} 匹配不到 {@code /works/1/trip}。
+     */
+    @GetMapping("/{id}/trip")
+    public Result<Trip> getTripOfWork(@PathVariable Long id) {
+        return Result.success(workService.getTripByWorkId(id));
     }
 
     /**

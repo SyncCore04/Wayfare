@@ -2,6 +2,12 @@
   <div class="work-card" @click="goDetail">
     <div class="card-cover">
       <img :src="work.coverUrl || work.imageUrls?.[0] || defaultCover" :alt="work.title" loading="lazy" />
+      <!-- AI 生成角标（P5-C）：让用户能区分人工原创与 AI 辅助生成 ——
+           这是内容诚信，也是本项目的差异化卖点。数据来自后端回填的 aiGenerated
+           （work 表没有 trip_id，关联存在反方向的 trip.work_id 上） -->
+      <div v-if="work.aiGenerated" class="ai-badge" title="这条攻略由 AI 行程规划生成">
+        <el-icon><MagicStick /></el-icon><span>AI 生成</span>
+      </div>
       <div class="card-overlay">
         <div class="overlay-stats">
           <span><el-icon><View /></el-icon>{{ work.viewCount || 0 }}</span>
@@ -95,6 +101,22 @@ function goUser() {
   &:hover img {
     transform: scale(1.05);
   }
+}
+
+// AI 生成角标（P5-C）：常显，不放进 hover 遮罩 —— 手机上 hover 根本触发不了
+.ai-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #fff;
+  background: rgba(64, 158, 255, 0.92);
+  border-radius: 10px;
 }
 
 .card-overlay {

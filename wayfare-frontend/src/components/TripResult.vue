@@ -52,60 +52,14 @@
       <div v-else ref="mapEl" class="map-canvas"></div>
     </div>
 
-    <!-- ⑤ 时间轴：按天分页 -->
-    <el-tabs v-model="activeDay" class="day-tabs">
-      <el-tab-pane
-        v-for="day in localDays"
-        :key="day.dayIndex"
-        :label="`第 ${day.dayIndex} 天`"
-        :name="String(day.dayIndex)"
-      >
-        <div class="day-card">
-          <h4 class="day-title">{{ day.title || `第 ${day.dayIndex} 天` }}</h4>
-          <p v-if="day.summary" class="day-summary">{{ day.summary }}</p>
-
-          <div v-if="!day.items || !day.items.length" class="day-empty">这一天还没有安排</div>
-
-          <div v-for="(item, idx) in day.items" :key="item.poiUid || item.poiRef || idx" class="item-row">
-            <div class="item-time">
-              <span>{{ item.startTime || '--:--' }}</span>
-              <span class="time-sep">-</span>
-              <span>{{ item.endTime || '--:--' }}</span>
-              <span v-if="item.stayMinutes" class="stay">{{ item.stayMinutes }} 分钟</span>
-            </div>
-
-            <div class="item-main">
-              <div class="item-head">
-                <span class="item-name">{{ item.poiName || item.poiRef }}</span>
-                <!-- 来源角标：这是「事实数据永不来自大模型」的可视化出口 -->
-                <el-tag size="small" :type="badgeType(item.verifyStatus)" effect="light">
-                  {{ badgeText(item.verifyStatus) }}
-                </el-tag>
-                <el-tag v-if="item.itemType === 'FOOD'" size="small" type="success" effect="plain">餐饮</el-tag>
-              </div>
-              <p v-if="item.reason" class="item-reason">{{ item.reason }}</p>
-              <p v-if="item.note" class="item-note">{{ item.note }}</p>
-              <p v-if="item.address" class="item-address">{{ item.address }}</p>
-            </div>
-
-            <div class="item-cost">
-              <span v-if="item.costEstimate != null">约 {{ item.costEstimate }} 元</span>
-              <span v-else class="unknown">花费未知</span>
-            </div>
-
-            <div class="item-actions">
-              <el-button link size="small" :disabled="idx === 0" @click="move(day, idx, -1)">上移</el-button>
-              <el-button link size="small" :disabled="idx === day.items.length - 1" @click="move(day, idx, 1)">下移</el-button>
-              <el-button link size="small" type="danger" @click="removeItem(day, idx)">删除</el-button>
-            </div>
-          </div>
-
-          <div class="day-actions">
-            <el-button size="small" plain @click="emit('replan', day.dayIndex)">这一天太赶，重新排</el-button>
-          </div>
-        </div>
-      </el-tab-pane>
-    </el-tabs>
+    <!-- ⑤ 时间轴：按天分页。P5-C 起抽成 TripTimeline 共用组件 —— 与攻略详情页同一份渲染逻辑 -->
+    <TripTimeline
+      :days="localDays"
+      editable
+      @move="move"
+      @remove="removeItem"
+      @replan="(dayIndex) => emit('replan', dayIndex)"
+    />
 
     <!-- ⑥ 攻略文案（打字机：边收边渲染） -->
     <div class="copy-panel">
@@ -153,6 +107,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import TripTimeline from '@/components/TripTimeline.vue'
 
 const props = defineProps({
   draft: { type: Object, default: null },
@@ -172,16 +127,12 @@ const props = defineProps({
 
 const emit = defineEmits(['replan', 'regenerate-copy', 'publish', 'save-order'])
 
-// 本地可编辑副本：编辑（上移/下移/删除）先动这里，点「保存顺序」才提交后端
+// 本地可编辑副本：编辑（上移/下移/删除）先动这里，点「保存顺序」才提交后端。
+// 页签的选中状态由 TripTimeline 自己管（P5-C 抽出组件后这里不再需要 activeDay）
 const localDays = ref([])
-const activeDay = ref('1')
 
 watch(() => props.draft, (d) => {
-  const days = (d && d.days) ? JSON.parse(JSON.stringify(d.days)) : []
-  localDays.value = days
-  if (days.length && !days.some(x => String(x.dayIndex) === activeDay.value)) {
-    activeDay.value = String(days[0].dayIndex)
-  }
+  localDays.value = (d && d.days) ? JSON.parse(JSON.stringify(d.days)) : []
 }, { immediate: true })
 
 const violations = computed(() => props.validation || [])
@@ -233,34 +184,27 @@ const coordPlaceholder = computed(() => {
   return '本次行程没有可用的点位坐标。'
 })
 
-// ---------- 来源角标 ----------
-function badgeType(status) {
-  if (status === 'VERIFIED') return 'success'
-  if (status === 'CACHED') return 'info'
-  if (status === 'ESTIMATED') return 'warning'
-  if (status === 'USER') return 'primary'
-  return 'info'
+// ---------- 编辑（P5-C：改为接收 dayIndex —— 由 TripTimeline emit 上来）----------
+// 来源角标的 badgeType/badgeText 已随渲染一起搬进 TripTimeline，这里不再需要
+
+/** 找到某天的可编辑副本 */
+function findDay(dayIndex) {
+  return localDays.value.find(d => d.dayIndex === dayIndex)
 }
 
-function badgeText(status) {
-  if (status === 'VERIFIED') return '实测'
-  if (status === 'CACHED') return '缓存'
-  if (status === 'ESTIMATED') return '估算'
-  if (status === 'USER') return '手动'
-  return '未知来源'
-}
-
-// ---------- 编辑 ----------
-function move(day, idx, delta) {
-  const items = day.items
+function move(dayIndex, idx, delta) {
+  const day = findDay(dayIndex)
+  if (!day || !day.items) return
   const target = idx + delta
-  if (target < 0 || target >= items.length) return
-  const tmp = items[idx]
-  items[idx] = items[target]
-  items[target] = tmp
+  if (target < 0 || target >= day.items.length) return
+  const tmp = day.items[idx]
+  day.items[idx] = day.items[target]
+  day.items[target] = tmp
 }
 
-function removeItem(day, idx) {
+function removeItem(dayIndex, idx) {
+  const day = findDay(dayIndex)
+  if (!day || !day.items) return
   day.items.splice(idx, 1)
   ElMessage.info('已从当前视图移除，点「保存顺序」后生效')
 }

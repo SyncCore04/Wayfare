@@ -154,6 +154,13 @@ public class TripController {
     public Result<Trip> detail(@PathVariable Long id) {
         Trip trip = tripService.getDetail(id, UserContext.getUserId());
         if (trip == null) {
+            // 区分「不存在」(404) 与「存在但不是你的」(403) —— P5-C 验收 3 明确要求。
+            // 原实现两种情况都返回 404，等于把「越权访问」伪装成「资源不存在」，
+            // 调用方没法据此决定该提示「无权查看」还是「链接失效」。
+            // ⚠️ 代价：「某 id 是否有行程」变成可探测的（见 TripService.existsById 的说明）
+            if (tripService.existsById(id)) {
+                throw new BusinessException(ResultCode.FORBIDDEN, "这条行程不属于你");
+            }
             throw new BusinessException(ResultCode.NOT_FOUND, "行程不存在");
         }
         return Result.success(trip);

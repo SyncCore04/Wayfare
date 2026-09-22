@@ -30,6 +30,18 @@ public interface WorkService {
     Work getById(Long id);
 
     /**
+     * 取某条攻略关联的行程（P5-C · 详情页的「完整行程」区块用）。
+     *
+     * <p><b>可见性规则（手册 P5-C 第三节）</b>：行程默认仅本人可见，**发布为攻略时才随之公开**。
+     * 所以这里只在 {@code work.status == 1}（已发布）时才返回行程 —— 未发布/待审核的攻略，
+     * 即便有人猜到 workId 也拿不到行程内容。
+     *
+     * @return 关联行程（含 days + items，按 dayIndex/seq 正序）；无关联或未发布时返回 null
+     *         —— 「纯图文攻略」是正常状态，不是错误，所以不抛 404
+     */
+    com.wayfare.entity.Trip getTripByWorkId(Long workId);
+
+    /**
      * 分页查询作品列表
      *
      * @param destination 目的地精确匹配（攻略特有筛选维度，走 idx_destination）

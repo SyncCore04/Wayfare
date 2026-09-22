@@ -72,6 +72,9 @@ public class JwtInterceptor implements HandlerInterceptor {
             // 公开浏览
             "/works/page",
             "/works/{id:[0-9]+}",
+            // P5-C：攻略关联的完整行程也要能匿名看 —— 行程随攻略一起公开。
+            // ⚠️ 必须单独一条：PathPattern 是完整匹配，上面那条匹配不到 /works/1/trip
+            "/works/{id:[0-9]+}/trip",
             "/categories/tree",
             "/tags/hot",
             "/comments/work/**",

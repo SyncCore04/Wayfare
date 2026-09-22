@@ -50,6 +50,21 @@ public class Work implements Serializable {
     @TableField(exist = false)
     private List<String> imageUrls;
 
+    /**
+     * 这条攻略是否由 AI 行程生成而来（P5-C）。
+     *
+     * <p><b>不是表字段</b>：work 表没有 trip_id，关联关系存在反方向（{@code trip.work_id}）。
+     * 由 Service 查询后批量回填，用于卡片上的「AI 生成」角标 ——
+     * 让用户能区分人工原创与 AI 辅助生成，这是内容诚信，也是本项目的差异化卖点。
+     *
+     * <p>为 null 表示「未知」（老数据或未回填），前端按「不显示角标」处理。
+     */
+    @TableField(exist = false)
+    private Boolean aiGenerated;
+
+    public Boolean getAiGenerated() { return aiGenerated; }
+    public void setAiGenerated(Boolean aiGenerated) { this.aiGenerated = aiGenerated; }
+
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     public Long getUserId() { return userId; }

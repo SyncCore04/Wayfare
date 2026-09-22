@@ -52,17 +52,22 @@
             {{ work.description }}
           </div>
 
-          <!-- 完整行程（P5 占位） -->
-          <div class="itinerary-placeholder">
-            <div class="placeholder-head">
+          <!-- 完整行程（P5-C）：只在攻略确实关联了行程时才显示。
+               纯图文攻略**不显示该区块**，而不是显示一个空壳占位 -->
+          <div v-if="workTrip" class="itinerary-block">
+            <div class="itinerary-head">
               <el-icon><Compass /></el-icon>
               <span>完整行程</span>
+              <!-- 数据透明度：让读者知道这份行程是谁生成的、用的什么模型、可信度如何 -->
+              <span class="itinerary-meta">
+                <template v-if="workTrip.modelName">由 {{ workTrip.modelName }} 生成</template>
+                <template v-if="workTrip.generationRounds > 0"> · 约束校验重排 {{ workTrip.generationRounds }} 轮</template>
+              </span>
             </div>
-            <p class="placeholder-body">
-              这里将展示 AI 生成的逐日行程：每天的景点顺序、停留时长与交通方式。
-              行程规划能力在 P5 阶段接入，当前仅占位。
-            </p>
-            <el-button plain disabled size="small">查看完整行程（待接入）</el-button>
+
+            <div class="map-mode-bar" :class="mapModeClass">{{ mapModeText }}</div>
+
+            <TripTimeline :days="workTrip.dayPlans || []" />
           </div>
 
           <!-- 标签 -->
@@ -247,7 +252,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 import WorkCard from '@/components/WorkCard.vue'
 import { useUserStore } from '@/stores/user'
-import { getWorkDetail, deleteWork } from '@/api/work'
+import { getWorkDetail, deleteWork, getWorkTrip } from '@/api/work'
+import TripTimeline from '@/components/TripTimeline.vue'
 import { getCommentList, createComment, deleteComment as delComment } from '@/api/comment'
 import { likeWork, unlikeWork, checkLike, favoriteWork, unfavoriteWork, checkFavorite, followUser, unfollowUser, checkFollow } from '@/api/social'
 import { getSimilarWorks, recordBrowse } from '@/api/recommend'
@@ -257,6 +263,23 @@ const router = useRouter()
 const userStore = useUserStore()
 
 const work = ref(null)
+/** 关联的完整行程（P5-C）；null = 纯图文攻略或行程未发布 —— 此时整块不显示 */
+const workTrip = ref(null)
+
+/** 地图可信度提示条：与 P5-B 结果页同一套口径，读者不用猜这些距离是怎么来的 */
+const mapModeClass = computed(() => {
+  const m = workTrip.value && workTrip.value.mapMode
+  if (m === 'VERIFIED') return 'ok'
+  if (m === 'CACHED') return 'cached'
+  return 'estimated'
+})
+
+const mapModeText = computed(() => {
+  const m = workTrip.value && workTrip.value.mapMode
+  if (m === 'VERIFIED') return '距离与时长为地图实测'
+  if (m === 'CACHED') return '部分数据来自本地缓存'
+  return '未启用地图校验，里程与时间为估算值'
+})
 const loading = ref(false)
 const images = ref([])
 
@@ -281,7 +304,23 @@ const isOwner = computed(() => userStore.isLoggedIn && work.value?.author?.id ==
 
 onMounted(() => {
   fetchWorkDetail()
+  fetchWorkTrip()
 })
+
+/**
+ * 取关联的完整行程（P5-C）。
+ *
+ * 刻意独立于 fetchWorkDetail：行程是「锦上添花」的区块，取不到就不显示，
+ * 绝不能让它的失败影响攻略正文 —— 所以单独发一个请求、单独 catch。
+ */
+async function fetchWorkTrip() {
+  try {
+    const res = await getWorkTrip(route.params.id)
+    workTrip.value = res.data || null
+  } catch (e) {
+    workTrip.value = null
+  }
+}
 
 async function fetchWorkDetail() {
   loading.value = true
@@ -603,29 +642,41 @@ function formatTime(time) {
 }
 
 // 完整行程占位块（P5 填内容）
-.itinerary-placeholder {
-  border: 1px dashed #dcdfe6;
+// 完整行程区块（P5-C）
+.itinerary-block {
+  border: 1px solid #ebeef5;
   border-radius: 10px;
-  padding: 14px 16px;
+  padding: 16px;
   margin-bottom: 16px;
-  background: #fafcff;
 
-  .placeholder-head {
+  .itinerary-head {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 15px;
+    font-weight: 500;
     color: #303133;
-    margin-bottom: 6px;
-  }
+    margin-bottom: 10px;
 
-  .placeholder-body {
-    font-size: 12px;
-    color: #909399;
-    line-height: 1.6;
-    margin: 0 0 10px;
+    .itinerary-meta {
+      margin-left: auto;
+      font-size: 12px;
+      font-weight: 400;
+      color: #909399;
+    }
   }
+}
+
+// 地图可信度提示条：三色口径与 P5-B 的结果页保持一致
+.map-mode-bar {
+  padding: 8px 12px;
+  margin-bottom: 14px;
+  border-radius: 6px;
+  font-size: 13px;
+
+  &.ok { background: #f0f9eb; color: #529b2e; }
+  &.cached { background: #ecf5ff; color: #337ecc; }
+  &.estimated { background: #fdf6ec; color: #b88230; }
 }
 
 .work-tags {

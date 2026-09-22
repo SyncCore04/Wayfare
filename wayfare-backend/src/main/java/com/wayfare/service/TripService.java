@@ -63,6 +63,18 @@ public interface TripService {
     Trip getDetail(Long tripId, Long userId);
 
     /**
+     * 这个 id 是否对应一条真实存在的行程（<b>不限归属</b>）。
+     *
+     * <p><b>为什么需要它</b>：{@link #getDetail} 在「不存在」和「不属于你」两种情况下都返回 null，
+     * 调用方无法区分。而 P5-C 验收 3 要求后者返回 <b>403</b>、前者返回 404 ——
+     * 所以必须能单独回答「这条行程存不存在」。
+     *
+     * <p>⚠️ <b>安全权衡</b>：这让「某个 id 是否有行程」对已登录用户可探测（id 枚举）。
+     * 这里按手册要求实现；若要收紧，把调用方改回一律 404 即可（删掉本方法的使用处）。
+     */
+    boolean existsById(Long tripId);
+
+    /**
      * 我的行程分页（不含 days / items，列表页不需要）。
      */
     IPage<Trip> pageMy(Long userId, Integer pageNum, Integer pageSize);

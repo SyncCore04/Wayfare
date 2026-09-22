@@ -10,6 +10,16 @@ export function getWorkDetail(id) {
   return request({ url: `/works/${id}`, method: 'get' })
 }
 
+/**
+ * 攻略关联的「完整行程」（P5-C · 详情页时间轴）。
+ *
+ * 未发布/待审核的攻略拿不到行程；纯图文攻略返回 data: null（正常状态，不是错误）。
+ * 公开接口，未登录也能调。
+ */
+export function getWorkTrip(id) {
+  return request({ url: `/works/${id}/trip`, method: 'get' })
+}
+
 // 发布作品
 export function createWork(data) {
   return request({ url: '/works', method: 'post', data })

@@ -105,6 +105,17 @@ public class TripServiceImpl implements TripService {
     }
 
     @Override
+    public boolean existsById(Long tripId) {
+        if (tripId == null) {
+            return false;
+        }
+        // 不限 userId：只回答「这条行程存在吗」。Trip.deleted 带 @TableLogic，
+        // 已逻辑删除的行程会被自动排除 —— 对用户来说它就是不存在
+        Long count = tripMapper.selectCount(new LambdaQueryWrapper<Trip>().eq(Trip::getId, tripId));
+        return count != null && count > 0;
+    }
+
+    @Override
     public IPage<Trip> pageMy(Long userId, Integer pageNum, Integer pageSize) {
         return tripMapper.selectPage(new Page<>(pageNum, pageSize),
                 new LambdaQueryWrapper<Trip>()

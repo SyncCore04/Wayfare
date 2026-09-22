@@ -6,17 +6,20 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.wayfare.common.exception.BusinessException;
 import com.wayfare.common.result.ResultCode;
 import com.wayfare.dto.WorkDTO;
+import com.wayfare.entity.Trip;
 import com.wayfare.entity.Work;
 import com.wayfare.entity.WorkImage;
 import com.wayfare.entity.WorkTag;
 import com.wayfare.entity.Tag;
 import com.wayfare.entity.User;
+import com.wayfare.mapper.TripMapper;
 import com.wayfare.mapper.WorkImageMapper;
 import com.wayfare.mapper.WorkMapper;
 import com.wayfare.mapper.WorkTagMapper;
 import com.wayfare.mapper.TagMapper;
 import com.wayfare.mapper.UserMapper;
 import com.wayfare.service.ContentAuditService;
+import com.wayfare.service.TripService;
 import com.wayfare.service.WorkService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,6 +32,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -43,15 +48,51 @@ public class WorkServiceImpl implements WorkService {
     private final UserMapper userMapper;
     private final ContentAuditService contentAuditService;
 
+    /** P5-C：用来回填「是否 AI 生成」—— 关联关系存在反方向（{@code trip.work_id}） */
+    private final TripMapper tripMapper;
+
+    /** P5-C：详情页取关联行程时复用它（它内部已处理好 days + items 的正序装载） */
+    private final TripService tripService;
+
     public WorkServiceImpl(WorkMapper workMapper, WorkImageMapper workImageMapper,
                            WorkTagMapper workTagMapper, TagMapper tagMapper,
-                           UserMapper userMapper, ContentAuditService contentAuditService) {
+                           UserMapper userMapper, ContentAuditService contentAuditService,
+                           TripMapper tripMapper, TripService tripService) {
         this.workMapper = workMapper;
         this.workImageMapper = workImageMapper;
         this.workTagMapper = workTagMapper;
         this.tagMapper = tagMapper;
         this.userMapper = userMapper;
         this.contentAuditService = contentAuditService;
+        this.tripMapper = tripMapper;
+        this.tripService = tripService;
+    }
+
+    /**
+     * 批量回填「是否由 AI 行程生成」（P5-C）。
+     *
+     * <p><b>为什么是反向查</b>：work 表没有 trip_id，关联存在 {@code trip.work_id} 上。
+     * 一次 IN 查询捞出这一页里所有「有行程关联」的 workId，再在内存里打标 ——
+     * 禁止在循环里逐条查库（与上面作者/标签/图片的批量填充同一个原则）。
+     */
+    private void fillAiGenerated(List<Work> works) {
+        if (works == null || works.isEmpty()) {
+            return;
+        }
+        List<Long> workIds = works.stream().map(Work::getId).filter(Objects::nonNull).collect(Collectors.toList());
+        if (workIds.isEmpty()) {
+            return;
+        }
+        Set<Long> aiWorkIds = tripMapper.selectList(new LambdaQueryWrapper<Trip>()
+                        .in(Trip::getWorkId, workIds)
+                        .select(Trip::getWorkId))
+                .stream()
+                .map(Trip::getWorkId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        for (Work w : works) {
+            w.setAiGenerated(aiWorkIds.contains(w.getId()));
+        }
     }
 
     /**
@@ -206,7 +247,33 @@ public class WorkServiceImpl implements WorkService {
         }
         // 图片列表：从 work_image 按 sort 正序取真实数据
         work.setImageUrls(loadImageUrls(id, work.getCoverUrl()));
+        // 是否 AI 生成（P5-C）：详情页据此决定要不要展示「完整行程」区块
+        fillAiGenerated(List.of(work));
         return work;
+    }
+
+    @Override
+    public Trip getTripByWorkId(Long workId) {
+        if (workId == null) {
+            return null;
+        }
+        // ① 只有「已发布」的攻略才公开行程（手册 P5-C 第三节的可见性规则）。
+        //    未发布/待审核时即便猜到 workId 也拿不到 —— 返回 null 而不是 404，
+        //    因为「纯图文攻略」与「未发布」在前端都表现为「不显示该区块」
+        Work work = workMapper.selectById(workId);
+        if (work == null || work.getStatus() == null || work.getStatus() != 1) {
+            return null;
+        }
+        // ② 找关联行程（关联存在 trip.work_id 上，不是 work.trip_id）
+        Trip trip = tripMapper.selectOne(new LambdaQueryWrapper<Trip>()
+                .eq(Trip::getWorkId, workId)
+                .last("LIMIT 1"));
+        if (trip == null) {
+            return null;
+        }
+        // ③ 用行程自己的 userId 去取详情：getDetail 内部会校验归属并装载 days/items，
+        //    传作者本人的 id 是因为「作者查看自己发布的攻略」是合法路径
+        return tripService.getDetail(trip.getId(), trip.getUserId());
     }
 
     @Override
@@ -298,6 +365,9 @@ public class WorkServiceImpl implements WorkService {
                         ? urls
                         : coverFallback(work.getCoverUrl()));
             });
+
+            // 5. 批量回填「是否 AI 生成」（P5-C）：卡片右上角的角标靠它
+            fillAiGenerated(records);
         }
 
         return result;
