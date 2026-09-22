@@ -1,6 +1,17 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import { ref } from 'vue'
 import router from '@/router'
+
+/**
+ * 正在进行的请求数（P5-D）。
+ *
+ * 拦截器里 +1 / -1，App.vue 据此显示顶部加载条 ——
+ * 这样「有没有在加载」只有一处真相，各页面不必各自维护 loading 标志，
+ * 也不会出现「A 页面转圈、B 页面不转」的不一致。
+ * 组件只读它，不要直接改。
+ */
+export const pendingCount = ref(0)
 
 const request = axios.create({
   baseURL: '/api',
@@ -14,14 +25,20 @@ request.interceptors.request.use(
     if (token) {
       config.headers['Authorization'] = `Bearer ${token}`
     }
+    pendingCount.value++
     return config
   },
-  error => Promise.reject(error)
+  error => {
+    // 请求都没发出去也要把计数还回去，否则加载条会永远停在那
+    pendingCount.value = Math.max(0, pendingCount.value - 1)
+    return Promise.reject(error)
+  }
 )
 
 // 响应拦截器：统一处理返回结果
 request.interceptors.response.use(
   response => {
+    pendingCount.value = Math.max(0, pendingCount.value - 1)
     const res = response.data
     // 业务成功
     if (res.code === 200) {
@@ -40,6 +57,7 @@ request.interceptors.response.use(
     return Promise.reject(new Error(res.message || '请求失败'))
   },
   error => {
+    pendingCount.value = Math.max(0, pendingCount.value - 1)
     if (error.response) {
       const status = error.response.status
       if (status === 401) {

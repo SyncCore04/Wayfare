@@ -49,6 +49,12 @@ const routes = [
         meta: { title: 'AI 规划', requiresAuth: true }
       },
       {
+        path: 'trips',
+        name: 'MyTrips',
+        component: () => import('@/views/MyTrips.vue'),
+        meta: { title: '我的行程', requiresAuth: true }
+      },
+      {
         path: 'profile',
         name: 'Profile',
         component: () => import('@/views/Profile.vue'),

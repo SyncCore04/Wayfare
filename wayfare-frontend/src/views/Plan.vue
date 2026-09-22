@@ -2,7 +2,7 @@
   <div class="plan-page container">
     <h2 class="page-title">AI 行程规划</h2>
 
-    <el-steps :active="step" align-center finish-status="success" class="plan-steps">
+    <el-steps :active="step" :direction="stepsDirection" align-center finish-status="success" class="plan-steps">
       <el-step title="输入需求" />
       <el-step title="确认参数" />
       <el-step title="生成行程" />
@@ -231,8 +231,8 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { useRouter, onBeforeRouteLeave } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import TripResult from '@/components/TripResult.vue'
 import { getTravelProfile } from '@/api/profile'
 import { parseIntent, planStream, replan, regenerateCopy, updateItemOrder } from '@/api/trip'
@@ -362,11 +362,59 @@ const profileSummary = computed(() => {
   return on.map(c => c.label).join(' / ')
 })
 
-onMounted(loadProfile)
+onMounted(() => {
+  loadProfile()
+  syncStepsDirection()
+  window.addEventListener('beforeunload', handleBeforeUnload)
+  window.addEventListener('resize', syncStepsDirection)
+})
 
 onBeforeUnmount(() => {
   if (abortController) abortController.abort()
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+  window.removeEventListener('resize', syncStepsDirection)
 })
+
+/**
+ * 移动端步骤条改纵向（P5-D）。
+ *
+ * 必须用 JS 而不是 CSS：`el-steps` 的方向是 **prop**，媒体查询改不动它 ——
+ * 横向的四步在 375px 宽度下会挤成一团、文字互相压住。
+ */
+const stepsDirection = ref('horizontal')
+
+function syncStepsDirection() {
+  stepsDirection.value = window.innerWidth <= 768 ? 'vertical' : 'horizontal'
+}
+
+/**
+ * 生成中途离开要拦一下（P5-D · 验收 2）。
+ *
+ * 为什么值得做：一次生成要 6~10 分钟，误点导航或误刷新就白等一场；
+ * 更关键的是后端那些管线里的 LLM 调用是**非流式**的、掐不断，token 已经花掉了。
+ * 两道都拦：路由守卫管站内跳转，beforeunload 管刷新/关标签页。
+ */
+onBeforeRouteLeave(async () => {
+  if (!generating.value) return true
+  try {
+    await ElMessageBox.confirm(
+      '行程正在生成中，离开会中断本次生成（已消耗的模型调用不会退回）。确定离开吗？',
+      '确认离开',
+      { confirmButtonText: '离开', cancelButtonText: '继续等待', type: 'warning' }
+    )
+    cancelGenerate()
+    return true
+  } catch (e) {
+    return false
+  }
+})
+
+function handleBeforeUnload(e) {
+  if (!generating.value) return
+  // 现代浏览器会忽略自定义文案，但必须设置 returnValue 才会弹默认确认框
+  e.preventDefault()
+  e.returnValue = ''
+}
 
 async function loadProfile() {
   try {
@@ -517,11 +565,45 @@ function handleEvent(evt) {
   if (evt.event === 'error') {
     copyStreaming.value = false
     const code = data && data.code
-    const msg = (data && data.message) || '生成过程中出错'
     if (code === 'CLIENT_DISCONNECTED') return
-    ElMessage.warning(msg)
+    ElMessage.warning(describeError(code, data && data.message))
     // 行程已经推过来的话，留在结果页（手册要求：文案失败不清空行程）
     if (!draft.value) step.value = 1
+  }
+}
+
+/**
+ * 把错误码翻译成「用户能据以行动」的话（P5-D）。
+ *
+ * 「生成失败」这四个字对用户毫无信息量 —— 他不知道是自己说错了、还是管理员没配 Key、
+ * 还是额度用完了。这里按码给出下一步该做什么：运维类问题明确指向管理员，
+ * 用户自己能解决的（换个说法、稍后重试）就直说。
+ *
+ * 码有两套来源：编排失败的 code 来自 ResultCode，文案阶段来自 AiErrorCode（见后端 errorData 的调用处）。
+ */
+function describeError(code, rawMessage) {
+  switch (code) {
+    case 'LLM_DISABLED':
+      return 'AI 规划能力当前被管理员关闭了，请联系管理员在后台开启'
+    case 'LLM_NOT_AVAILABLE':
+      return '大模型服务暂时不可用（可能未配置 Key，或都在熔断中），请稍后重试或联系管理员'
+    case 'LLM_AUTH_FAIL':
+      return '大模型认证失败，请联系管理员检查 API Key 是否有效'
+    case 'LLM_TIMEOUT':
+      return '大模型响应超时（长行程耗时较长），请稍后重试'
+    case 'LLM_RATE_LIMIT':
+      return '大模型限流了，请过一会儿再试'
+    case 'LLM_SERVER_ERROR':
+      return '大模型服务端故障，请稍后重试'
+    case 'LLM_PARSE_ERROR':
+    case 'LLM_PARSE_FAIL':
+      return '大模型返回的内容不合规（可能是模型能力问题），请换个说法再试'
+    case 'CANDIDATE_SHORTAGE':
+      return '这个目的地能检索到的点位太少，换个说法或换个地方试试'
+    case 'VALIDATION_FAILED':
+      return '行程没能排到完全满足约束，已保留当前最优结果 —— 你可以手动调整，或换个说法重试'
+    default:
+      return rawMessage || '生成过程中出错，请稍后重试'
   }
 }
 

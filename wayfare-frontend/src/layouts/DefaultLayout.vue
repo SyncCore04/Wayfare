@@ -10,11 +10,18 @@
           </router-link>
         </div>
 
+        <!-- 移动端汉堡按钮（P5-D）：桌面端隐藏，点开是抽屉菜单 -->
+        <button class="hamburger show-mobile" aria-label="打开菜单" @click="drawerVisible = true">
+          <el-icon :size="22"><Menu /></el-icon>
+        </button>
+
         <!-- 桌面端导航 -->
         <nav class="nav-center hide-mobile">
           <router-link to="/" class="nav-link">首页</router-link>
           <router-link to="/?tab=hot" class="nav-link">热门</router-link>
           <router-link to="/?tab=recommend" class="nav-link">推荐</router-link>
+          <router-link to="/plan" class="nav-link">AI 规划</router-link>
+          <router-link to="/trips" class="nav-link">我的行程</router-link>
         </nav>
 
         <div class="nav-right">
@@ -96,6 +103,17 @@
         <p class="copyright">© 2024 Wayfare. All rights reserved.</p>
       </div>
     </footer>
+
+    <!-- 移动端抽屉菜单（P5-D）：桌面导航在 768px 以下被隐藏，入口收在这里 -->
+    <el-drawer v-model="drawerVisible" direction="ltr" size="240px" :with-header="false">
+      <div class="drawer-nav">
+        <router-link to="/" class="drawer-link" @click="drawerVisible = false">首页</router-link>
+        <router-link to="/?tab=hot" class="drawer-link" @click="drawerVisible = false">热门</router-link>
+        <router-link to="/?tab=recommend" class="drawer-link" @click="drawerVisible = false">推荐</router-link>
+        <router-link to="/plan" class="drawer-link" @click="drawerVisible = false">AI 规划</router-link>
+        <router-link to="/trips" class="drawer-link" @click="drawerVisible = false">我的行程</router-link>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -107,6 +125,9 @@ import { useUserStore } from '@/stores/user'
 import { getUnreadCount } from '@/api/message'
 
 const router = useRouter()
+
+/** 移动端抽屉菜单开关（P5-D）；桌面端不显示汉堡按钮，这个值始终为 false */
+const drawerVisible = ref(false)
 const userStore = useUserStore()
 const searchKey = ref('')
 const unreadCount = ref(0)
@@ -315,6 +336,41 @@ function handleCommand(command) {
   opacity: 0;
 }
 
+/* 移动端抽屉菜单（P5-D） */
+.show-mobile {
+  display: none;
+}
+
+.hamburger {
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  color: #606266;
+  cursor: pointer;
+}
+
+.drawer-nav {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 0;
+}
+
+.drawer-link {
+  padding: 12px 16px;
+  font-size: 15px;
+  color: #303133;
+  text-decoration: none;
+  border-bottom: 1px solid #f5f5f5;
+
+  &.router-link-active {
+    color: #409eff;
+    font-weight: 500;
+  }
+}
+
 @media (max-width: 768px) {
   .nav-container {
     padding: 0 12px;
@@ -324,6 +380,10 @@ function handleCommand(command) {
   }
   .main-content {
     padding: 12px 0;
+  }
+  /* 汉堡按钮只在移动端出现；桌面端导航仍由 .hide-mobile 隐藏 */
+  .show-mobile {
+    display: flex;
   }
 }
 </style>
