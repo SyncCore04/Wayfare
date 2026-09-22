@@ -43,6 +43,12 @@ const routes = [
         meta: { title: '编辑作品', requiresAuth: true }
       },
       {
+        path: 'plan',
+        name: 'Plan',
+        component: () => import('@/views/Plan.vue'),
+        meta: { title: 'AI 规划', requiresAuth: true }
+      },
+      {
         path: 'profile',
         name: 'Profile',
         component: () => import('@/views/Profile.vue'),

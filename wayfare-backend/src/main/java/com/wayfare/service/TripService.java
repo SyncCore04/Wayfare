@@ -73,14 +73,16 @@ public interface TripService {
     void logicDelete(Long tripId, Long userId);
 
     /**
-     * 重排某一天内的条目顺序。
+     * 重排某一天内的条目顺序（P5-B 的「上移 / 下移 / 拖拽」编辑用它）。
      *
      * @param tripId          行程ID
+     * @param userId          当前用户ID，<b>用于归属校验</b> ——
+     *                        签名里带上它，是为了让「换个 id 就改别人的行程顺序」不可能发生
      * @param dayIndex        第几天（从 1 起）
      * @param itemIdsInOrder  该天的条目ID，<b>按目标顺序排列</b>；
      *                        实现方按数组下标回写 {@code seq}（0 起）
      */
-    void updateItemOrder(Long tripId, Integer dayIndex, List<Long> itemIdsInOrder);
+    void updateItemOrder(Long tripId, Long userId, Integer dayIndex, List<Long> itemIdsInOrder);
 
     /**
      * 写回攻略文案（P4-B）。

@@ -145,9 +145,16 @@ public class TripServiceImpl implements TripService {
     }
 
     @Override
-    public void updateItemOrder(Long tripId, Integer dayIndex, List<Long> itemIdsInOrder) {
+    @Transactional
+    public void updateItemOrder(Long tripId, Long userId, Integer dayIndex, List<Long> itemIdsInOrder) {
         if (itemIdsInOrder == null) {
             return;
+        }
+        // 归属校验：先确认这条行程是这个人的，否则一律当不存在。
+        // 原实现只比对了 tripId，意味着「猜到别人的 tripId + itemId」就能改别人的行程顺序 ——
+        // 行程是私有数据，每个方法都必须校验归属（P2-B 定下的约束，这里补齐）
+        if (getDetail(tripId, userId) == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "行程不存在");
         }
         int seq = 0;
         for (Long itemId : itemIdsInOrder) {

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.wayfare.common.exception.BusinessException;
 import com.wayfare.common.result.Result;
 import com.wayfare.common.result.ResultCode;
+import com.wayfare.dto.IntentDTO;
 import com.wayfare.dto.TripPlanRequest;
 import com.wayfare.dto.TripPlanResponse;
 import com.wayfare.entity.Trip;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -81,6 +83,28 @@ public class TripController {
         resp.setComposeError(o.composeError());
         resp.setMeta(o.meta());
         return Result.success(resp);
+    }
+
+    /**
+     * 只解析意图（P5-B · 前端四步流程的「确认参数」步骤）。
+     *
+     * <p>请求体与 {@link #planSync} 相同，但<b>只跑 Step1</b>，不检索点位、不调地图、
+     * 不落库。P5-B 的 Step 2 要让用户先确认 AI 猜的参数，确认之后才发起真正的生成 ——
+     * 若这一步去调 {@code /plan/sync}，就是「为了拿一张确认表单先跑完整条管线」，
+     * 用户白等几分钟、token 白花一倍。
+     *
+     * <p>返回的 {@code needConfirm} 数组列着「AI 猜的、需要用户确认」的字段名，
+     * 前端据此在对应表单项旁打橙色标记。
+     */
+    @PostMapping("/parse")
+    public Result<IntentDTO> parse(@RequestBody TripPlanRequest req) {
+        if (req == null || !StringUtils.hasText(req.getRawInput())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "行程需求不能为空");
+        }
+        Long userId = UserContext.getUserId();
+        boolean useProfile = req.getUseProfile() == null || req.getUseProfile();
+        return Result.success(
+                orchestrator.parseOnly(userId, req.getRawInput().trim(), useProfile, toOverrides(req)));
     }
 
     /**
@@ -174,6 +198,23 @@ public class TripController {
     }
 
     /**
+     * 重排某一天的条目顺序（P5-B 的「上移 / 下移」编辑用它）。
+     *
+     * <p>入参是该天条目的<b>目标顺序</b>，实现按数组下标回写 {@code seq}（0 起）。
+     * 归属校验在 {@link TripService#updateItemOrder} 里（签名带 userId）。
+     */
+    @PutMapping("/{id}/days/{dayIndex}/order")
+    public Result<Void> updateItemOrder(@PathVariable Long id,
+                                        @PathVariable Integer dayIndex,
+                                        @RequestBody OrderRequest body) {
+        if (body == null || body.getItemIds() == null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "条目顺序不能为空");
+        }
+        tripService.updateItemOrder(id, UserContext.getUserId(), dayIndex, body.getItemIds());
+        return Result.success();
+    }
+
+    /**
      * 逻辑删除行程（置 {@code trip.deleted}）。
      */
     @DeleteMapping("/{id}")
@@ -215,5 +256,13 @@ public class TripController {
 
         public String getFeedback() { return feedback; }
         public void setFeedback(String feedback) { this.feedback = feedback; }
+    }
+
+    /** 条目排序请求体：该天条目 ID 按目标顺序排列 */
+    public static class OrderRequest {
+        private List<Long> itemIds;
+
+        public List<Long> getItemIds() { return itemIds; }
+        public void setItemIds(List<Long> itemIds) { this.itemIds = itemIds; }
     }
 }

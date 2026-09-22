@@ -181,6 +181,30 @@ public class TripOrchestrator {
     }
 
     /**
+     * 只跑 Step1 意图解析，不碰后面的管线（P5-B 的「确认参数」步骤用它）。
+     *
+     * <p><b>为什么需要它</b>：P5-B 的四步流程里，Step 2 要让用户先确认 AI 猜的参数
+     * （目的地/天数/预算口径/交通…），确认之后才真正发起生成。如果这一步去调
+     * {@code /plan/sync}，等于为了拿一个意图就把整条管线跑完 —— 用户等几分钟只为看到
+     * 一张确认表单，而且后面还要再跑一次，token 白花一倍。
+     *
+     * <p>它与完整管线的 Step1 走的是<b>同一个</b> {@code IntentParser} 和同一个
+     * 画像加载逻辑，所以「解析结果」和真正生成时看到的一致 —— 这一点必须保证，
+     * 否则用户在确认页改的参数会和实际生成用的对不上。
+     *
+     * <p>返回的 {@link IntentDTO#getNeedConfirm()} 是这一步的重点：里面列着
+     * 「AI 猜的、需要用户确认」的字段名，前端据此在对应表单项旁打橙色标记。
+     *
+     * @return 解析结果；{@code destination} / {@code days} 缺失时不抛异常，
+     *         而是进 {@code needConfirm}（P3-A 的既有约定，见其注释）
+     */
+    public IntentDTO parseOnly(Long userId, String rawInput, boolean useProfile, ProfileOverrides overrides) {
+        ResolvedMap capability = mapResolver.resolve();
+        UserTravelProfile profile = loadProfile(userId, useProfile);
+        return intentParser.parseIntent(rawInput, profile, overrides, capability);
+    }
+
+    /**
      * 基于已落库行程的「重排」（P3-F 的 {@code POST /api/trip/{id}/replan}）。
      *
      * <p>不重跑意图解析：从 {@code trip.intent_json} 恢复 {@link IntentDTO}，
