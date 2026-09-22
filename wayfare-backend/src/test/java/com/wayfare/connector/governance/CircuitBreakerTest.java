@@ -10,6 +10,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -105,6 +106,23 @@ class CircuitBreakerTest {
     @DisplayName("isOpen 对没有失败记录的名字返回 false（不误伤正常厂商）")
     void unknownNameIsNotOpen() {
         assertFalse(circuitBreaker.isOpen("test:cb:never-failed"));
+    }
+
+    @Test
+    @DisplayName("快照按前缀报阈值：llm 报 3 / map 报 5（P6-A 修 —— 原来一律写死 map 的 5）")
+    void snapshotReportsPrefixAwareThreshold() {
+        // 这条测试锁的是一个「诊断信息说谎」的 bug：快照原来把 map.breaker.* 写死，
+        // 于是大模型熔断被读出「阈值 5」，而它实际第 3 次失败就跳闸 ——
+        // 管理页显示 0/5 却在第 3 次变红，看的人只会以为是界面坏了。
+        java.util.Map<String, Object> llmState = circuitBreaker.state(TEST_NAME, LLM_PREFIX);
+        java.util.Map<String, Object> mapState = circuitBreaker.state(TEST_NAME, MAP_PREFIX);
+
+        assertEquals(3, llmState.get("failThreshold"),
+                "大模型快照应报 llm.breaker.fail-threshold（库未执行初始化脚本时取默认 3），实际 = " + llmState);
+        assertEquals(5, mapState.get("failThreshold"),
+                "地图快照应报 map.breaker.fail-threshold（库里有值 5），实际 = " + mapState);
+        assertEquals(5, circuitBreaker.state(TEST_NAME).get("failThreshold"),
+                "单参 state() 应保持「地图语境」，兼容既有诊断调用方");
     }
 
     @Test

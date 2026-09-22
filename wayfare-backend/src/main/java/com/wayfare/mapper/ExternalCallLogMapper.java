@@ -36,4 +36,16 @@ public interface ExternalCallLogMapper extends BaseMapper<ExternalCallLog> {
     /** 今天的调用总数 */
     @Select("SELECT COUNT(*) FROM external_call_log WHERE connector = #{connector} AND created_at >= CURDATE()")
     long countToday(@Param("connector") String connector);
+
+    /**
+     * 最近一次失败的原因（P6-A 连接器管理页的状态卡片用）。
+     *
+     * <p>为什么值得单独查一条：诊断页只报「上次失败时间」时，管理员还得自己去翻日志才知道
+     * 失败是 Key 错、超时还是限流。带上原因，页面上一眼就能看出该做什么。
+     * 只取最近一条非空 error_msg —— 一条没留原因的失败不该把有原因的那条挤掉。
+     */
+    @Select("SELECT error_msg FROM external_call_log "
+            + "WHERE connector = #{connector} AND success = 0 AND error_msg IS NOT NULL "
+            + "ORDER BY created_at DESC LIMIT 1")
+    String findLastErrorMessage(@Param("connector") String connector);
 }

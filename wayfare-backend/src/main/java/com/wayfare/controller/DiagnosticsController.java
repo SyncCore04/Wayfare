@@ -3,11 +3,13 @@ package com.wayfare.controller;
 import com.wayfare.common.exception.BusinessException;
 import com.wayfare.common.result.Result;
 import com.wayfare.common.result.ResultCode;
+import com.wayfare.common.util.MaskUtil;
 import com.wayfare.connector.governance.CircuitBreaker;
 import com.wayfare.connector.llm.LlmCallContext;
 import com.wayfare.connector.llm.LlmCapabilityResolver;
 import com.wayfare.connector.llm.LlmException;
 import com.wayfare.connector.llm.LlmInfo;
+import com.wayfare.connector.llm.LlmProperties;
 import com.wayfare.connector.llm.LlmProvider;
 import com.wayfare.connector.llm.LlmProviderFactory;
 import com.wayfare.connector.llm.ResolvedLlm;
@@ -18,10 +20,12 @@ import com.wayfare.connector.map.PoiQueryDTO;
 import com.wayfare.connector.governance.ExternalCallLogService;
 import com.wayfare.connector.governance.ExternalCallRecord;
 import com.wayfare.security.UserContext;
+import com.wayfare.service.AiLogService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -50,17 +54,26 @@ public class DiagnosticsController {
 
     private final LlmCapabilityResolver llmResolver;
     private final LlmProviderFactory llmFactory;
+    private final LlmProperties llmProperties;
     private final MapCapabilityResolver mapResolver;
     private final ExternalCallLogService callLogService;
+    private final CircuitBreaker circuitBreaker;
+    private final AiLogService aiLogService;
 
     public DiagnosticsController(LlmCapabilityResolver llmResolver,
                                  LlmProviderFactory llmFactory,
+                                 LlmProperties llmProperties,
                                  MapCapabilityResolver mapResolver,
-                                 ExternalCallLogService callLogService) {
+                                 ExternalCallLogService callLogService,
+                                 CircuitBreaker circuitBreaker,
+                                 AiLogService aiLogService) {
         this.llmResolver = llmResolver;
         this.llmFactory = llmFactory;
+        this.llmProperties = llmProperties;
         this.mapResolver = mapResolver;
         this.callLogService = callLogService;
+        this.circuitBreaker = circuitBreaker;
+        this.aiLogService = aiLogService;
     }
 
     // ==================== 聚合诊断 ====================
@@ -87,9 +100,21 @@ public class DiagnosticsController {
             llm.put("reason", "大模型能力已被关闭（llm.enabled=false）");
         }
         llm.putAll(callLogService.stats(ExternalCallRecord.CONNECTOR_LLM));
-        // token 统计要等 P4-C 把用量落库后才有数据来源，这里如实返回 null
-        llm.put("todayTokens", null);
-        llm.put("estCost", null);
+        // 今日 token / 成本：P4-C 把用量落库后这里终于能给真数了
+        // （P1-E 时期恒为 null 的占位注释已过期，P6-A 补上）。
+        // 单价未配置时 totalEstCost 仍是 null —— 如实显示「未配置」，不编 0。
+        try {
+            Map<String, Object> today = aiLogService.generationStats(LocalDate.now(), LocalDate.now());
+            llm.put("todayTokens", today.get("totalTokens"));
+            llm.put("estCost", today.get("totalEstCost"));
+            llm.put("todayGenerationCount", today.get("totalCount"));
+            llm.put("todayTripCount", today.get("tripCount"));
+        } catch (Exception e) {
+            // 诊断接口绝不能因为统计查询失败而 500：如实说明拿不到
+            llm.put("todayTokens", null);
+            llm.put("estCost", null);
+            llm.put("statsError", "今日用量统计失败：" + e.getMessage());
+        }
 
         Map<String, Object> map = new LinkedHashMap<>();
         var mapResolved = mapResolver.resolve();
@@ -99,14 +124,76 @@ public class DiagnosticsController {
         map.put("provider", mapResolved.provider().name());
         map.put("available", mapResolved.provider().isAvailable());
         map.put("reason", mapResolved.reason());
-        CircuitBreaker circuitBreaker = mapResolver.breaker();
-        Map<String, Object> breakerState = circuitBreaker.state("baidu");
+        // 地图熔断状态。这里不再把 mapResolver.breaker() 存进局部变量 ——
+        // 那会与注入的 circuitBreaker 字段同名遮蔽，读代码的人会以为用的是同一个来源。
+        Map<String, Object> breakerState = mapResolver.breaker().state("baidu");
         map.put("breakerOpen", Boolean.TRUE.equals(breakerState.get("breakerOpen")));
         map.putAll(callLogService.stats(ExternalCallRecord.CONNECTOR_BAIDU_MAP));
 
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("llm", llm);
         data.put("map", map);
+        return Result.success(data);
+    }
+
+    // ==================== LLM 厂商清单（P6-A） ====================
+
+    /**
+     * 已注册的厂商逐个列出配置与状态 —— 后台连接器管理页的卡片数据源。
+     *
+     * <p><b>为什么必须单独有这个接口</b>：{@code /diagnostics/connectors} 只回答
+     * 「当前选中的是哪家」，而管理页要给<b>每一家</b>都画一张卡片，
+     * 包括没被选中的那几家 —— 否则管理员看不出「备用的那家到底配没配」。
+     *
+     * <p><b>Key 一律掩码</b>（只回前 4 位 + ****）：管理页要回答的是「填的是不是那一把」，
+     * 不是完整值 —— 完整 Key 一旦进过浏览器就等于已经泄露。
+     *
+     * <p>⚠️ {@code model} / {@code baseUrl} / Key 都来自 <b>L1</b>（application.yml 与 .env.properties），
+     * <b>只读展示、不支持在线修改</b>：模型名每家各一个，单独一个 {@code llm.model} 键在降级链里没法落
+     * （详见 {@code AdminConfigController#setLlm}）。要换模型得改配置后重启。
+     */
+    @GetMapping("/llm/providers")
+    public Result<Map<String, Object>> llmProviders() {
+        checkAdmin();
+
+        List<String> names = new ArrayList<>(llmFactory.names());
+        names.sort(String::compareTo);
+        List<Map<String, Object>> providers = new ArrayList<>();
+        for (String name : names) {
+            LlmProvider provider = llmFactory.get(name);
+            if (provider == null) {
+                continue;
+            }
+            LlmInfo info = provider.info();
+            LlmProperties.LlmProviderConfig config = llmProperties.getProvider(name);
+            // 必须带 "llm" 前缀：不带的话快照会按 map.breaker.* 报出「阈值 5」，
+            // 而它真正生效的是 llm.breaker.fail-threshold（默认 3）—— 页面会与事实矛盾
+            Map<String, Object> breaker = circuitBreaker.state(name, "llm");
+
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("name", name);
+            row.put("model", info.model());
+            row.put("hasL1Config", config != null);
+            row.put("baseUrl", config == null ? null : config.getBaseUrl());
+            // 与全局同一套掩码规则（前 4 位 + ****），不要各写各的
+            row.put("apiKeyMasked", config == null ? null : MaskUtil.maskSecret(config.getApiKey()));
+            row.put("keyConfigured", config != null && config.isConfigured());
+            row.put("available", info.available());
+            row.put("reason", info.reason());
+            row.put("breakerOpen", Boolean.TRUE.equals(breaker.get("breakerOpen")));
+            row.put("breakerFailCount", breaker.get("failCount"));
+            row.put("breakerThreshold", breaker.get("failThreshold"));
+            row.put("breakerRemainingSeconds", breaker.get("remainingOpenSeconds"));
+            providers.add(row);
+        }
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("providers", providers);
+        if (llmResolver.isEnabled()) {
+            data.put("activeProvider", llmResolver.resolve().providerName());
+        }
+        data.put("configSource", "L1");
+        data.put("configNote", "模型名 / Base URL / API Key 来自 application.yml 与 .env.properties：可查看，不可在线修改");
         return Result.success(data);
     }
 

@@ -74,6 +74,9 @@ public class ExternalCallLogServiceImpl implements ExternalCallLogService {
 
             stats.put("lastSuccessAt", lastSuccess);
             stats.put("lastErrorAt", lastError);
+            // 上次失败的原因（P6-A 加的）。截到 200 字：状态卡片上放不下整段堆栈，
+            // 而外部服务返回的长报文对「我该做什么」没有额外信息。
+            stats.put("lastErrorMessage", truncate(mapper.findLastErrorMessage(connector), 200));
             stats.put("calls1h", calls1h);
             stats.put("failures1h", failures1h);
             // 失败率：窗口内没有调用时给 null（0% 会让「还没发生过」和「都很顺利」看起来一样）

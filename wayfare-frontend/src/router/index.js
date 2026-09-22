@@ -103,6 +103,12 @@ const routes = [
         name: 'AdminAudit',
         component: () => import('@/views/admin/Audit.vue'),
         meta: { title: '内容审核' }
+      },
+      {
+        path: 'connectors',
+        name: 'AdminConnectors',
+        component: () => import('@/views/admin/Connectors.vue'),
+        meta: { title: '连接器管理' }
       }
     ]
   },

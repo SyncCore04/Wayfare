@@ -45,8 +45,24 @@ public class CircuitBreaker {
     private static final String FAIL_KEY_PREFIX = "cb:fail:";
     private static final String OPEN_KEY_PREFIX = "cb:open:";
 
-    /** 大模型的配置前缀（读 {@code llm.breaker.*}）；地图用 {@code map}，见 {@link #recordFailure(String)} */
+    /**
+     * 配置前缀：决定读 {@code llm.breaker.*} 还是 {@code map.breaker.*}。
+     * 地图是历史默认值（P1-D 时只有它一个接入方），大模型在 P4 修复时接进来。
+     */
+    private static final String BREAKER_PREFIX_MAP = "map";
     private static final String BREAKER_PREFIX_LLM = "llm";
+
+    /**
+     * 前缀对应的默认阈值。
+     *
+     * <p><b>必须与 db/schema-trip.sql 的初始值一致</b>：库没执行过初始化脚本时靠它兜底，
+     * 两边不一致会让「未初始化」的部署静默跑偏（且不会有任何报错）。
+     * 大模型阈值更低是因为它一次失败要白等一整个 {@code llm.timeout-ms}（90 秒），
+     * 而地图一次失败只损失几百毫秒。
+     */
+    private static int defaultThreshold(String configPrefix) {
+        return BREAKER_PREFIX_LLM.equals(configPrefix) ? 3 : 5;
+    }
 
     /** 失败计数的存活时间：超过它没再失败就认为「历史上的连续失败」已经过去 */
     private static final long FAIL_COUNTER_TTL_SECONDS = 3600;
@@ -108,8 +124,8 @@ public class CircuitBreaker {
         // 默认值必须与 db/schema-trip.sql 的初始值一致 ——
         // 否则「库还没执行过初始化脚本」的部署会跟配置好的部署行为不同，
         // 而且这种差异不会有任何报错（本次写测试时正是踩在这个默认值上）
-        int defaultThreshold = BREAKER_PREFIX_LLM.equals(configPrefix) ? 3 : 5;
-        int threshold = sysConfigService.getInt(configPrefix + ".breaker.fail-threshold", defaultThreshold);
+        int fallbackThreshold = defaultThreshold(configPrefix);
+        int threshold = sysConfigService.getInt(configPrefix + ".breaker.fail-threshold", fallbackThreshold);
         int openSeconds = sysConfigService.getInt(configPrefix + ".breaker.open-seconds", 300);
         try {
             String failKey = FAIL_KEY_PREFIX + name;
@@ -144,8 +160,25 @@ public class CircuitBreaker {
     /**
      * 诊断快照：状态、失败计数、剩余打开秒数。
      * 手册要求「状态要能被诊断接口读到」，这个方法是那个要求的出口。
+     *
+     * <p>等价于 {@code state(name, "map")} —— 地图是既有调用方的默认语境，
+     * 保留这个签名免得改动波及既有诊断代码。
      */
     public Map<String, Object> state(String name) {
+        return state(name, BREAKER_PREFIX_MAP);
+    }
+
+    /**
+     * 诊断快照（P6-A 加的重载）：按前缀读对应阈值。
+     *
+     * <p><b>为什么必须带前缀</b>：原实现把 {@code map.breaker.*} 写死在快照里，
+     * 于是大模型熔断被诊断页读出「阈值 5」—— 而它实际生效的门槛是
+     * {@code llm.breaker.fail-threshold}（默认 3）。管理页上「0/5」与「第 3 次就跳闸」
+     * 互相矛盾，属于**诊断信息说谎**，比没有信息更坏。
+     *
+     * @param configPrefix {@code map} 或 {@code llm}
+     */
+    public Map<String, Object> state(String name, String configPrefix) {
         Map<String, Object> state = new LinkedHashMap<>();
         state.put("breakerName", name);
         try {
@@ -158,8 +191,9 @@ public class CircuitBreaker {
             boolean open = deadline > now;
             state.put("breakerOpen", open);
             state.put("failCount", failCount);
-            state.put("failThreshold", sysConfigService.getInt("map.breaker.fail-threshold", 5));
-            state.put("openSeconds", sysConfigService.getInt("map.breaker.open-seconds", 300));
+            state.put("failThreshold", sysConfigService.getInt(
+                    configPrefix + ".breaker.fail-threshold", defaultThreshold(configPrefix)));
+            state.put("openSeconds", sysConfigService.getInt(configPrefix + ".breaker.open-seconds", 300));
             state.put("remainingOpenSeconds", open ? (deadline - now) / 1000 : 0);
         } catch (Exception e) {
             state.put("breakerOpen", false);

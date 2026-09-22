@@ -31,6 +31,10 @@
             <el-icon><CircleCheck /></el-icon>
             <template #title>内容审核</template>
           </el-menu-item>
+          <el-menu-item index="/admin/connectors">
+            <el-icon><Connection /></el-icon>
+            <template #title>连接器管理</template>
+          </el-menu-item>
         </el-menu>
       </el-aside>
 

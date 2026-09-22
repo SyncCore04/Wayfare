@@ -25,8 +25,9 @@ public interface ExternalCallLogService {
     /**
      * 某连接器的运行统计（诊断接口 P1-E 用）。
      *
-     * @return lastSuccessAt / lastErrorAt / failRate1h / calls1h / failures1h / todayCallCount。
-     *         字段可能为 null（比如一次调用都还没有）。
+     * @return lastSuccessAt / lastErrorAt / lastErrorMessage / failRate1h / calls1h / failures1h / todayCallCount。
+     *         字段可能为 null（比如一次调用都还没有）。{@code lastErrorMessage} 于 P6-A 补充 ——
+     *         状态卡片要能直接告诉管理员「上次为什么失败」，而不是让他再去翻日志表。
      */
     Map<String, Object> stats(String connector);
 }
