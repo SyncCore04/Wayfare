@@ -31,6 +31,11 @@
         <mybatis-plus.version>3.5.7</mybatis-plus.version>
         <jjwt.version>0.12.6</jjwt.version>
         <springdoc.version>2.6.0</springdoc.version>
+        <!--
+          覆盖率（P7-A 验收 2）。选 0.8.12：0.8.11 之前的版本不支持 JDK 17 的字节码版本，
+          会报 "Unsupported class file major version 61" —— 这类错误看起来像测试挂了，其实是插桩器太旧。
+        -->
+        <jacoco.version>0.8.12</jacoco.version>
     </properties>
 
     <dependencies>
@@ -135,6 +140,38 @@
                         </exclude>
                     </excludes>
                 </configuration>
+            </plugin>
+            <!--
+              覆盖率报告（P7-A）。绑在 test 阶段：跑完 `mvn test` 就会在
+              target/site/jacoco/index.html 生成报告，不需要额外命令。
+              排除掉 Spring Boot 启动类与纯配置类 —— 那几行代码没有分支，
+              统计进去只会稀释重点类的数字。
+            -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.version}</version>
+                <configuration>
+                    <excludes>
+                        <exclude>com/wayfare/WayfareApplication.class</exclude>
+                        <exclude>com/wayfare/**/package-info.class</exclude>
+                    </excludes>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

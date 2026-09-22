@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -306,6 +307,97 @@ class ItineraryValidatorTest {
         ValidationReport report = validator.validate(null, intent(null, IntentDTO.BUDGET_MODE_TOTAL, IntentDTO.TRANSPORT_MIX), empty, null, null);
         assertFalse(report.passed());
         assertTrue(report.toUserHint().contains("个严重问题"));
+    }
+
+    // ==================== 边界与守卫（P7-A 补：把覆盖率从 84.7% 抬过 85%） ====================
+    //
+    // 这些用例的共同点是「输入本身是脏的或缺失的」：空池、items 为 null、时间格式不可解析……
+    // 它们不该产生误报，也不该抛异常 —— 校验器是防幻觉的最后一道闸门，
+    // 它自己因为脏输入崩掉，比放过去一个编造点位更糟。
+
+    @Test
+    @DisplayName("ruleDescriptions 覆盖全部七条规则且说明非空（重排纠正 prompt 与文档都依赖它）")
+    void ruleDescriptionsCoverAllRules() {
+        Map<String, String> rules = ItineraryValidator.ruleDescriptions();
+        assertEquals(7, rules.size(), "七条规则一条都不能少");
+        for (String rule : List.of(ItineraryValidator.RULE_CLOSURE, ItineraryValidator.RULE_TIME_OVERLAP,
+                ItineraryValidator.RULE_BACKTRACK, ItineraryValidator.RULE_DETOUR,
+                ItineraryValidator.RULE_BUDGET_EXCEED, ItineraryValidator.RULE_TABOO,
+                ItineraryValidator.RULE_TOO_DENSE)) {
+            assertTrue(rules.containsKey(rule), "缺少规则说明：" + rule);
+            assertFalse(rules.get(rule).isBlank(), rule + " 的说明不能是空白 —— 空白说明等于没有说明");
+        }
+    }
+
+    @Test
+    @DisplayName("CLOSURE 守卫：候选池为 null 或空池 → 放行（池子空是 P3-D 就不该出草稿，这里不重复报）")
+    void closureSkipsWhenPoolMissing() {
+        TripDraftDTO draft = draft(day(1, item("任意点", "SCENIC", "09:00", "10:30", "顺路")));
+        assertTrue(validator.checkClosure(draft, null).isEmpty(), "池为 null 时不该崩，也不该报违规");
+        assertTrue(validator.checkClosure(draft, new CandidatePool(List.of(), MapMode.ESTIMATED)).isEmpty(),
+                "空池时不该报违规");
+    }
+
+    @Test
+    @DisplayName("CLOSURE 守卫：某天 items 为 null → 跳过该天，不抛 NPE")
+    void closureSkipsDayWithoutItems() {
+        TripDraftDTO.DayDraft d = day(1, item("寿阳文庙", "SCENIC", "09:00", "10:30", "顺路"));
+        d.setItems(null);
+        assertTrue(validator.checkClosure(draft(d), pool()).isEmpty());
+    }
+
+    @Test
+    @DisplayName("CLOSURE：poiRef 为空 → 判为池外（空引用不可能对应真实点位）")
+    void closureFlagsBlankRef() {
+        List<Violation> vs = validator.checkClosure(
+                draft(day(1, item("", "SCENIC", "09:00", "10:30", "顺路"))), pool());
+        assertEquals(1, vs.size());
+        assertEquals(ItineraryValidator.RULE_CLOSURE, vs.get(0).code());
+        assertEquals(Violation.SEVERITY_HIGH, vs.get(0).severity());
+    }
+
+    @Test
+    @DisplayName("CLOSURE：候选池里有「没名称」的脏数据 → 跳过它，不能因此把正常点位误判成编造")
+    void closureToleratesCandidateWithoutName() {
+        CandidateDTO dirty = new CandidateDTO();   // 名称与 uid 都没有
+        CandidatePool mixed = new CandidatePool(
+                List.of(dirty, cand("寿阳文庙", "SCENIC", 113.07, 37.75)), MapMode.ESTIMATED);
+        assertTrue(validator.checkClosure(
+                        draft(day(1, item("寿阳文庙", "SCENIC", "09:00", "10:30", "顺路"))), mixed).isEmpty(),
+                "脏数据不该影响正常点位通过闭包校验");
+    }
+
+    @Test
+    @DisplayName("TIME_OVERLAP 守卫：items 为 null 或空列表 → 跳过该天")
+    void timeOverlapSkipsEmptyDays() {
+        TripDraftDTO.DayDraft empty = new TripDraftDTO.DayDraft();
+        empty.setDayIndex(1);
+        empty.setItems(new ArrayList<>());
+        assertTrue(validator.checkTimeOverlap(draft(empty)).isEmpty());
+
+        TripDraftDTO.DayDraft nullItems = day(2, item("寿阳文庙", "SCENIC", "09:00", "10:30", "顺路"));
+        nullItems.setItems(null);
+        assertTrue(validator.checkTimeOverlap(draft(nullItems)).isEmpty());
+    }
+
+    @Test
+    @DisplayName("TIME_OVERLAP：时间格式无法解析 → MEDIUM 且不抛异常（P3-D 拦过一次，这里是兜底）")
+    void timeOverlapFlagsUnparsableTime() {
+        List<Violation> vs = validator.checkTimeOverlap(
+                draft(day(1, item("寿阳文庙", "SCENIC", "上午九点", "十点半", "顺路"))));
+        assertEquals(1, vs.size());
+        assertEquals(ItineraryValidator.RULE_TIME_OVERLAP, vs.get(0).code());
+        assertEquals(Violation.SEVERITY_MEDIUM, vs.get(0).severity());
+    }
+
+    @Test
+    @DisplayName("TIME_OVERLAP：零时长 + 下一项开始时间没递增 → 两条都被抓到")
+    void timeOverlapFlagsZeroLengthAndNonIncreasing() {
+        List<Violation> vs = validator.checkTimeOverlap(draft(day(1,
+                item("寿阳文庙", "SCENIC", "09:00", "09:00", "零时长"),
+                item("冷泉寺", "SCENIC", "09:00", "10:30", "开始时间没晚于上一项"))));
+        assertEquals(2, vs.size(), "零时长与「开始时间未递增」都该被报出来，实际 = " + vs);
+        vs.forEach(v -> assertEquals(ItineraryValidator.RULE_TIME_OVERLAP, v.code()));
     }
 
     // ==================== 工具 ====================
