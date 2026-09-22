@@ -7,6 +7,7 @@ import com.wayfare.security.UserContext;
 import com.wayfare.service.AiLogService;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -59,6 +60,21 @@ public class AdminGenerationController {
             throw new BusinessException(ResultCode.PARAM_ERROR, "开始日期不能晚于结束日期");
         }
         return Result.success(aiLogService.generationStats(start, end));
+    }
+
+    /**
+     * 某条行程的 token 与成本拆解：{@code GET /api/admin/generation/trips/{tripId}/breakdown}
+     *
+     * <p>手册 P4-C 验收 4 要的「一次完整生成的 token 与成本拆解表」就是它的输出：
+     * 分阶段列出 token 与耗时，并给出这次生成的总 token 与预估成本。
+     *
+     * <p>放在 admin 域而不是 trip 域是有意的：token 与单价属于运维信息，
+     * 不该出现在普通用户自己的行程详情响应里。
+     */
+    @GetMapping("/trips/{tripId}/breakdown")
+    public Result<Map<String, Object>> tripBreakdown(@PathVariable Long tripId) {
+        checkAdmin();
+        return Result.success(aiLogService.breakdownByTrip(tripId));
     }
 
     private void checkAdmin() {
