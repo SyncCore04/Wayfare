@@ -56,6 +56,20 @@ public class DeepSeekProvider extends AbstractOpenAiCompatibleProvider {
             // 不加这个，流式响应里就没有 usage，token 统计与成本记录全为 0
             body.putObject("stream_options").put("include_usage", true);
         }
+
+        // 🔴 deepseek-flash 是推理模型，官方 /models 声明 `effort.default_level = high` ——
+        // **不显式下发强度时它会按 high 跑**，思考量会吃满 max-tokens：
+        // 实测 max_tokens=16 时返回 `content` 为空、`reasoning_content` 占满 16 个 token
+        // （与 GLM 5.3「超时且无返回」是同一类病根）。
+        // 官方 400 报错原文给出的合法档位：none / minimal / low / medium / high / xhigh / ultra / max
+        // —— 比 GLM 的 3 档多，且 **支持 none = 彻底关闭思考**（实测 none 档 reasoning 为 0 字符、
+        // 合计 token 从 214 降到 116，输出质量一致）。
+        // 与 GLM 一样做成配置项而非硬编码：不同阶段需要的强度不一样。
+        String effort = config() == null ? null : config().getReasoningEffort();
+        if (effort != null && !effort.isBlank()) {
+            body.put("reasoning_effort", effort.trim());
+        }
+
         // 注意：这里与 GLM 不同，刻意不加 response_format ——
         // DeepSeek 的 JSON 输出靠 prompt 约束就够稳，少一个参数少一个失败点。
     }

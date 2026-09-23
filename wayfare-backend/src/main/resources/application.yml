@@ -193,9 +193,25 @@ llm:
     deepseek:
       base-url: https://api.deepseek.com/v1
       api-key: "${DEEPSEEK_API_KEY:}"
-      model: deepseek-chat
+      # 2026-09-23 换用 deepseek-flash（= DeepSeek-V4.1-Flash）。官方 /models 实测：
+      # 1M 上下文 / 393K 最大输出 / input_modalities 含 image。原配的 deepseek-chat
+      # 已不在官方模型列表里（列表只有 deepseek-flash 与 deepseek-v4-pro）。
+      model: deepseek-flash
       temperature: 0.3
-      max-tokens: 4096
+      # 🔴 原值 4096 是当年 glm-4-flash 长输出被截断的根因（CANDIDATE 阶段要吐 5k+ token）。
+      # flash 支持 393K 输出，这里给足；max-tokens 只是上限、按实际产出计费。
+      max-tokens: 32768
+      # 🔴 deepseek-flash 是推理模型，官方声明 effort.default_level = high ——
+      # 不显式下发强度时会按 high 跑，思考会吃满 max-tokens（实测 max_tokens=16 时
+      # content 为空、reasoning_content 占满，与 GLM 5.3 同类问题）。
+      # 合法档位（官方 400 报错原文）：none / minimal / low / medium / high / xhigh / ultra / max
+      # —— 比 GLM 的 3 档多，且**支持 none = 彻底关闭思考**。
+      # 🔴 2026-09-23 实测（**同一个真实 PARSE prompt、干净输入**，各档位对比）：
+      #   none 0.8s / 96 out-tokens ｜ minimal 3.4s / 641 ｜ low 5.5s / 1171 ｜ high 9.7s / 2139
+      # → **解析质量四档全对**；不显式下发时走默认 high，比 none **慢 12 倍、token 多 22 倍**。
+      # 本项目 PARSE 是确定性抽取任务（不需要思考），故选 `none`：
+      # 完整管线 **9.2s 跑通**（tripId 372，destination=寿阳、10 个点位）。
+      reasoning-effort: none
 
 # ---------- 地图：默认整体关闭。无 AK 也能开发，关闭属「能力降级」而非功能降级 ----------
 map:

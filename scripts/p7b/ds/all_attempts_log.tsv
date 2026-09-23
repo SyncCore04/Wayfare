@@ -1,0 +1,7 @@
+id	trip_id	stage	provider	model	prompt_tokens	completion_tokens	duration_ms	success	error_code
+2266	NULL	PARSE	deepseek	deepseek-flash	1011	89	774	1	NULL
+2267	372	PARSE	deepseek	deepseek-flash	1011	96	640	1	NULL
+2268	372	CANDIDATE	deepseek	deepseek-flash	633	521	2823	1	NULL
+2269	372	COMPOSE	deepseek	deepseek-flash	1364	1364	5599	1	NULL
+2270	372	VALIDATE	NULL	NULL	NULL	NULL	NULL	1	NULL
+2271	372	ROUTE	map	NULL	NULL	NULL	9164	1	NULL

@@ -1,0 +1,7 @@
+﻿=== PARSE A/B: useProfile true vs false, 2026-09-23T22:27:48.5028532+08:00 ===
+[1] useProfile=true ms=859 destination=[洛阳] companion=[] tags=[古建筑]
+[2] useProfile=true ms=905 destination=[洛阳] companion=[] tags=[古建筑]
+[3] useProfile=false ms=673 destination=[洛阳] companion=[] tags=[古建筑]
+[4] useProfile=false ms=828 destination=[洛阳] companion=[] tags=[古建筑]
+[5] useProfile=true ms=702 destination=[大同] companion=[] tags=[古建筑]
+=== done 2026-09-23T22:27:52.7190836+08:00 ===

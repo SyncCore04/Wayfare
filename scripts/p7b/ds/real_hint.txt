@@ -1,0 +1,17 @@
+{
+  "destination": "目的地名称（字符串；用户没说就省略此字段）",
+  "days": 5,
+  "startDate": "yyyy-MM-dd（用户没说日期就省略此字段）",
+  "budgetTotal": 500,
+  "budgetMode": "PER_PERSON 或 TOTAL（人均 / 总计）",
+  "transport": "DRIVE 或 PUBLIC 或 WALK 或 MIX",
+  "companion": "同行人，如 爸妈 / 一个人 / 情侣",
+  "preferenceTags": ["古建筑", "博物馆"],
+  "pace": "1=慢 2=适中 3=紧凑（数字）",
+  "dietaryOverrides": ["不吃辣"],
+  "needConfirm": ["budgetMode"],
+  "confidence": 0.8
+}
+days 不超过 5；budgetMode 只能是 PER_PERSON 或 TOTAL；transport 只能是 DRIVE/PUBLIC/WALK/MIX；pace 只能是 1/2/3。没有依据的字段直接省略，不要填 null，也不要填空字符串。
+2026-09-23T22:30:54.930+08:00 DEBUG 44568 --- [wayfare-backend] [nio-8080-exec-4] c.w.mapper.ExternalCallLogMapper.insert  : ==>  Preparing: INSERT INTO external_call_log ( user_id, connector, api_name, request_summary, http_status, duration_ms, success, created_at ) VALUES ( ?, ?, ?, ?, ?, ?, ?, ? )
+2026-09-23T22:30:54.931+08:00 DEBUG 44568 --- [wayfare-backend] [nio-8080-exec-4] c.w.mapper.ExternalCallLogMapper.insert  : ==> Parameters: 1(Long), LLM(String), v1/chat/completions(String), POST https://api.deepseek.com/v1/chat/completions body={"model":"deepseek-flash","messages":[{"role":"system","content":"你是旅行需求解析器。把用户的一句话行程需求解析成 json。\n\n【今天的日期】\n2026-09-23（星期三）。\n用户说「周末」「明天」「下个月」这类相对时间时，以今天为基准推算成 yyyy-MM-dd。\n「周末」指最近的周六；若今天已经是周六或周日，就指今天。\n\n【硬性要求】\n1. 天数必须在 1 ~ 5 天之间。用户说的天数超了也不要改，如实填，由系统提示他拆分。\n2. 只填用户真的说了的字段。**没有依据就不要填**，宁缺
