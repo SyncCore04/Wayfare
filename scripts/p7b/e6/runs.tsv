@@ -1,0 +1,24 @@
+provider	idx	ok	httpSec	tripId	durationMs	metaTokens	metaEstCost	rounds	mapMode	composeError	tripTitle
+deepseek	1	True	19.2							PARSE_ERR 'data'	
+deepseek	2	True	10.0	381	9937	4853	None	0	ESTIMATED	None	寿阳古建与市井两日慢行
+deepseek	3	True	8.8	382	8834	4898	None	0	ESTIMATED	None	寿阳古建与山野两日慢行
+deepseek	4	True	9.6	383	9622	2187	0.0038	0	ESTIMATED	None	寿阳古城人文两日慢行
+deepseek	5	True	8.7	384	8646	2209	0.0039	0	ESTIMATED	None	寿阳古建与市井两日慢行
+glm	1	True	64.7	385	64671	8118	None	0	ESTIMATED	None	寿阳山水古建两日慢行
+glm	2	True	96.0	386	96024	7684	None	1	ESTIMATED	None	寿阳山水人文两日慢行
+glm	3	True	58.4	387	58352	3106	0.0052	0	ESTIMATED	None	寿阳古建山水两日慢行
+glm	4	True	39.2	388	39142	6669	None	0	ESTIMATED	None	寿阳古韵山水两日慢行
+glm	5	True	55.0	389	55026	4269	None	0	ESTIMATED	None	寿阳祁寯藻故里两日人文慢游
+qwen	1	True	449.6	390	449559	14513	None	0	ESTIMATED	[qwen] 大模型调用超时：已尝试全部候选厂商 [qwen:LLM_TIMEOUT]，均失败。最后一次原因：[qwen] 大模型调用超时：调用外部服务失败（超时）：请求超时	None
+qwen	2	True	269.0	391	268987	2448	None	0	ESTIMATED	候选池为空，没有可编排的点位	None
+qwen	3	True	426.4	392	426379	12728	None	0	ESTIMATED	[qwen] 大模型调用超时：已尝试全部候选厂商 [qwen:LLM_TIMEOUT]，均失败。最后一次原因：[qwen] 大模型调用超时：调用外部服务失败（超时）：请求超时	None
+qwen	4	True	463.1	393	463119	35794	None	1	ESTIMATED	None	寿阳古建与市井烟火两日慢行
+qwen	5	True	478.0	394	477989	37539	None	1	ESTIMATED	None	寿阳古建与山水两日慢行
+deepseek	6	True	19.2							PARSE_ERR 'data'	
+qwen	6	True	426.1	396	426067	19663	None	1	ESTIMATED	None	寿阳古韵与市井烟火两日慢游
+qwen	7	True	278.3	397	278319	14337	None	0	ESTIMATED	候选池为空，没有可编排的点位	None
+qwen	8	True	646.4	398	646411	29494	None	1	ESTIMATED	None	寿阳山水古韵两日慢游
+deepseek	7	True	9.1	399	9095	2224	0.004	0	ESTIMATED	None	寿阳古建市井两日慢行
+qwen	9	True	19.3							PARSE_ERR 'data'	
+qwen	10	True	366.7	401	366678	24154	None	0	ESTIMATED	None	寿阳古韵与市井烟火两日漫旅
+qwen	11	True	400.8	402	400789	11318	None	0	ESTIMATED	[qwen] 大模型调用超时：已尝试全部候选厂商 [qwen:LLM_TIMEOUT]，均失败。最后一次原因：[qwen] 大模型调用超时：调用外部服务失败（超时）：请求超时	None
