@@ -438,13 +438,26 @@ M 取的是 **`AVG(completion_tokens)` of COPY 阶段**（实测 417.4，12 条�
 - 结论：是**沙箱定期回收后台进程**的环境问题，与产品无关。对策：采集脚本改成**每轮前探活 + 可续跑**，
   分批（5 次 + 4 次）跑完。
 
-# 第六项 · 单次生成成本 ⬜ 待采集（**有一处阻塞**）
+# 第六项 · 单次生成成本 ⬜ 待采集（阻塞已解除，只剩一项前置）
 
 计划：三个模型各跑 5 次完整生成，报平均 tokens 与平均成本（用 P4-C 公式）。
-> 🔴 **阻塞**：`.env.properties` 里 `DEEPSEEK_API_KEY` 为空 → 手册原定的第三个模型跑不了。
-> 需用户决定：补 DeepSeek Key，或把第三个模型换成 `kimi-k2.6`（Key 已配置）。
-> 另外手册原文写的 `GLM-4-Flash / GLM-4-Plus / DeepSeek-Chat` 与现状不符，
-> 应按现状改为 **`glm-5.3-flash` / `qwen3.8-flash` / `deepseek-chat`（或 `kimi-k2.6`）**。
+手册原文写的 `GLM-4-Flash / GLM-4-Plus / DeepSeek-Chat` 与现状不符，
+按现状应为 **`glm-5.3-flash` / `qwen3.8-flash` / `deepseek-flash`**。
+
+**2026-09-23 22:40 状态更新**（用户已填 `DEEPSEEK_API_KEY`，第三家厂商可用）：
+
+| 项 | 状态 |
+|---|---|
+| DeepSeek Key | ✅ 已配置 |
+| 模型 id | ✅ `deepseek-chat` → **`deepseek-flash`**（官方 `/models` 里原 id 已不存在） |
+| `reasoning_effort` | ✅ 已配 **`none`**（不配则走默认 `high`：实测比 none 慢 12 倍、token 多 22 倍） |
+| 端到端可用性 | ✅ 完整管线 **9.2s 跑通**（tripId 372，10 个点位，`rounds=0`） |
+| 三个模型的实测单价 | ⚠️ **只有 glm 配了真实单价**（¥0.8/¥2.8）；`llm.price.deepseek*` 仍是 **0（未配置）**、qwen 是免费档 |
+
+> 🔴 **唯一剩余前置**：DeepSeek 的单价未写入 `sys_config`（按 P4-C 口径，单价缺失时 `estCost` 返回 null）。
+> 需按官网实际报价写入 `llm.price.deepseek-input` / `llm.price.deepseek-output` 后才能算成本。
+> 另外取数要绕开已知缺陷：`meta.tokens` 按「用户 + 时间窗」查、会被相邻行程污染 →
+> **一律用 `ai_generation_log` 按 `trip_id` 聚合**（见第三项 3.6）。
 
 ---
 
