@@ -1,0 +1,28 @@
+﻿=== P7-B item2 POI cache cold/warm (single query, 20 rounds), start 2026-09-23T22:04:34.6944352+08:00 ===
+login ok tokenLen=232
+map enabled -> ok=True
+redis map:poi* cleared before run = 1 ; remaining = 0
+[1] cleared=0 afterClear=0 cold=620ms(VERIFIED,n=10) warm=9ms(VERIFIED,n=10)
+[2] cleared=1 afterClear=0 cold=1081ms(VERIFIED,n=10) warm=10ms(VERIFIED,n=10)
+[3] cleared=1 afterClear=0 cold=256ms(VERIFIED,n=10) warm=8ms(VERIFIED,n=10)
+[4] cleared=1 afterClear=0 cold=291ms(VERIFIED,n=10) warm=9ms(VERIFIED,n=10)
+[5] cleared=1 afterClear=0 cold=283ms(VERIFIED,n=10) warm=9ms(VERIFIED,n=10)
+[6] cleared=1 afterClear=0 cold=252ms(VERIFIED,n=10) warm=8ms(VERIFIED,n=10)
+[7] cleared=1 afterClear=0 cold=283ms(VERIFIED,n=10) warm=8ms(VERIFIED,n=10)
+[8] cleared=1 afterClear=0 cold=292ms(VERIFIED,n=10) warm=8ms(VERIFIED,n=10)
+[9] cleared=1 afterClear=0 cold=274ms(VERIFIED,n=10) warm=9ms(VERIFIED,n=10)
+[10] cleared=1 afterClear=0 cold=313ms(VERIFIED,n=10) warm=8ms(VERIFIED,n=10)
+[11] cleared=1 afterClear=0 cold=246ms(VERIFIED,n=10) warm=8ms(VERIFIED,n=10)
+[12] cleared=1 afterClear=0 cold=268ms(VERIFIED,n=10) warm=9ms(VERIFIED,n=10)
+[13] cleared=1 afterClear=0 cold=282ms(VERIFIED,n=10) warm=8ms(VERIFIED,n=10)
+[14] cleared=1 afterClear=0 cold=253ms(VERIFIED,n=10) warm=8ms(VERIFIED,n=10)
+[15] cleared=1 afterClear=0 cold=279ms(VERIFIED,n=10) warm=9ms(VERIFIED,n=10)
+[16] cleared=1 afterClear=0 cold=257ms(VERIFIED,n=10) warm=8ms(VERIFIED,n=10)
+[17] cleared=1 afterClear=0 cold=289ms(VERIFIED,n=10) warm=9ms(VERIFIED,n=10)
+[18] cleared=1 afterClear=0 cold=264ms(VERIFIED,n=10) warm=9ms(VERIFIED,n=10)
+[19] cleared=1 afterClear=0 cold=251ms(VERIFIED,n=10) warm=7ms(VERIFIED,n=10)
+[20] cleared=1 afterClear=0 cold=249ms(VERIFIED,n=10) warm=7ms(VERIFIED,n=10)
+map enabled=false (restored) ok=True
+redis map:poi* keys left = 1
+abort=False
+=== all done 2026-09-23T22:05:07.8368275+08:00 ===
