@@ -1,0 +1,9 @@
+﻿idx,inputIdx,tripId,rounds,mapMode,model,durationMs,tokens,estCost,composeError,validationCount,highCount
+23,1,321,0,ESTIMATED,glm-5.3-flash,38971,4743,,,0,0
+24,2,322,1,ESTIMATED,glm-5.3-flash,82785,8719,,,0,0
+25,3,323,0,ESTIMATED,glm-5.3-flash,54144,4732,,,0,0
+26,4,324,0,ESTIMATED,glm-5.3-flash,79265,2305,0.0029,,0,0
+27,5,325,0,ESTIMATED,glm-5.3-flash,56218,4579,,,0,0
+28,6,326,1,ESTIMATED,glm-5.3-flash,88983,7154,,,1,0
+29,5,327,0,ESTIMATED,glm-5.3-flash,72517,7650,,,0,0
+30,6,328,1,ESTIMATED,glm-5.3-flash,115447,5392,,,0,0

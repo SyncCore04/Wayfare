@@ -1,0 +1,8 @@
+﻿=== P7-B item3 convergence: 30 real generations, start 2026-09-23T12:53:13.4212509+08:00 ===
+[1] ok=True httpSec=127.2 rounds=2 model=glm-5.3-flash high=3 tokens=10207 composeErr= t=12:53:13
+[2] ok=True httpSec=147.8 rounds=2 model=glm-5.3-flash high=4 tokens=12606 composeErr= t=12:55:20
+[3] ok=True httpSec=153.7 rounds=2 model=glm-5.3-flash high=3 tokens=10902 composeErr= t=12:57:48
+[4] ok=True httpSec=109.2 rounds=2 model=glm-5.3-flash high=1 tokens=9680 composeErr= t=13:00:22
+[5] ok=True httpSec=179.4 rounds=2 model=glm-5.3-flash high=3 tokens=8026 composeErr= t=13:02:11
+[6] ok=True httpSec=137 rounds=2 model=glm-5.3-flash high=4 tokens=12090 composeErr= t=13:05:10
+[7] ok=True httpSec=163.9 rounds=2 model=glm-5.3-flash high=3 tokens=11662 composeErr= t=13:07:27

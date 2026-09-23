@@ -1,0 +1,32 @@
+﻿=== P7-B item3 convergence: 30 real generations, start 2026-09-23T13:25:34.3251200+08:00 ===
+[1] ok=True httpSec=77.8 rounds=0 model=glm-5.3-flash high=0 tokens=5540 composeErr= t=13:25:34
+[2] ok=True httpSec=94.2 rounds=1 model=glm-5.3-flash high=0 tokens=8001 composeErr= t=13:26:52
+[3] ok=True httpSec=92.5 rounds=1 model=glm-5.3-flash high=0 tokens=7262 composeErr= t=13:28:26
+[4] ok=True httpSec=96 rounds=1 model=glm-5.3-flash high=0 tokens=7372 composeErr= t=13:29:59
+[5] ok=True httpSec=118.5 rounds=1 model=glm-5.3-flash high=0 tokens=5281 composeErr= t=13:31:35
+[6] ok=True httpSec=128.9 rounds=1 model=glm-5.3-flash high=0 tokens=12150 composeErr= t=13:33:33
+[7] ok=True httpSec=51.6 rounds=0 model=glm-5.3-flash high=0 tokens=4745 composeErr= t=13:35:42
+[8] ok=True httpSec=95.1 rounds=1 model=glm-5.3-flash high=0 tokens=7886 composeErr= t=13:36:34
+[9] ok=True httpSec=98.6 rounds=1 model=glm-5.3-flash high=0 tokens=5076 composeErr= t=13:38:09
+[10] ok=True httpSec=61.2 rounds=0 model=glm-5.3-flash high=0 tokens=6923 composeErr= t=13:39:47
+[11] ok=True httpSec=71.1 rounds=0 model=glm-5.3-flash high=0 tokens=5138 composeErr= t=13:40:49
+[12] ok=True httpSec=99.7 rounds=1 model=glm-5.3-flash high=0 tokens=5493 composeErr= t=13:42:00
+[13] ok=True httpSec=74.1 rounds=0 model=glm-5.3-flash high=0 tokens=5777 composeErr= t=13:43:39
+[14] ok=True httpSec=91 rounds=1 model=glm-5.3-flash high=0 tokens=7668 composeErr= t=13:44:54
+[15] ok=True httpSec=94.1 rounds=1 model=glm-5.3-flash high=0 tokens=7156 composeErr= t=13:46:25
+[16] ok=True httpSec=89.5 rounds=1 model=glm-5.3-flash high=0 tokens=4580 composeErr= t=13:47:59
+[17] ok=True httpSec=54.8 rounds=0 model=glm-5.3-flash high=0 tokens=6904 composeErr= t=13:49:28
+[18] ok=True httpSec=107.8 rounds=1 model=glm-5.3-flash high=0 tokens=8893 composeErr= t=13:50:23
+[19] ok=True httpSec=70.9 rounds=0 model=glm-5.3-flash high=0 tokens=5239 composeErr= t=13:52:11
+[20] ok=True httpSec=112.6 rounds=1 model=glm-5.3-flash high=0 tokens=5560 composeErr= t=13:53:22
+[21] ok=True httpSec=48.6 rounds=0 model=glm-5.3-flash high=0 tokens=8070 composeErr= t=13:55:14
+[22] ok=True httpSec=44.8 rounds=0 model=glm-5.3-flash high=0 tokens=4412 composeErr= t=13:56:03
+[23] ok=True httpSec=1233.4 rounds=0 model=glm-5.3-flash high=0 tokens=2908 composeErr=[qwen] 大模型服务端错误：已尝试全部候选厂商 [glm:LLM_TIMEOUT, qwen:LLM_SERVER_ERROR]，均失败。最后一次原因：[qwen] 大模型服务端错误：调用外部服务失败 t=13:56:48
+[24] ok=True httpSec=17 rounds= model= high=0 tokens= composeErr= t=14:17:18
+[25] ok=True httpSec=0 rounds= model= high=0 tokens= composeErr= t=14:17:36
+[26] ok=True httpSec=0 rounds= model= high=0 tokens= composeErr= t=14:17:36
+[27] ok=True httpSec=0 rounds= model= high=0 tokens= composeErr= t=14:17:36
+[28] ok=True httpSec=0 rounds= model= high=0 tokens= composeErr= t=14:17:36
+[29] ok=True httpSec=0 rounds= model= high=0 tokens= composeErr= t=14:17:36
+[30] ok=True httpSec=0 rounds= model= high=0 tokens= composeErr= t=14:17:36
+=== all done 2026-09-23T14:17:36.1997504+08:00 ===
