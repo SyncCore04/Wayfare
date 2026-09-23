@@ -1,0 +1,12 @@
+﻿=== P7-B item5: abort at 20/50/80 pct, baseline=573 chars, start 2026-09-23T20:48:24.0187095+08:00 ===
+ABORT_20pct_1 target=115 ok=False itineraryMs=58505 deltaChars=115 deltaCount=81 totalMs=64628 CANCELLED_AT_115_chars
+ABORT_20pct_2 target=115 ok=False itineraryMs=-1 deltaChars=0 deltaCount=0 totalMs=1142 EX: 使用“0”个参数调用“ReadLine”时发生异常:“无法从传输连接中读取数据: 远程主机强迫关闭了一个现有的连接。。”
+ABORT_20pct_3 target=115 ok=False itineraryMs=-1 deltaChars=0 deltaCount=0 totalMs=8245 EX: 不能对 Null 值表达式调用方法。
+ABORT_50pct_1 target=286 ok=False itineraryMs=-1 deltaChars=0 deltaCount=0 totalMs=4086 EX: 不能对 Null 值表达式调用方法。
+ABORT_50pct_2 target=286 ok=False itineraryMs=-1 deltaChars=0 deltaCount=0 totalMs=4079 EX: 不能对 Null 值表达式调用方法。
+ABORT_50pct_3 target=286 ok=False itineraryMs=-1 deltaChars=0 deltaCount=0 totalMs=4101 EX: 不能对 Null 值表达式调用方法。
+ABORT_80pct_1 target=458 ok=False itineraryMs=-1 deltaChars=0 deltaCount=0 totalMs=4076 EX: 不能对 Null 值表达式调用方法。
+ABORT_80pct_2 target=458 ok=False itineraryMs=-1 deltaChars=0 deltaCount=0 totalMs=4095 EX: 不能对 Null 值表达式调用方法。
+ABORT_80pct_3 target=458 ok=False itineraryMs=-1 deltaChars=0 deltaCount=0 totalMs=4102 EX: 不能对 Null 值表达式调用方法。
+=== all done 2026-09-23T20:50:29.7455393+08:00 ===
+ABORT_20pct_2 target=115 ok=False itineraryMs=54752 deltaChars=115 deltaCount=77 totalMs=59244 CANCELLED_AT_115_chars

@@ -1,0 +1,17 @@
+id	trip_id	stage	provider	completion_tokens	duration_ms	success	error_code	error_msg
+2040	336	COPY	glm	423	15331	1	NULL	
+2046	337	COPY	glm	428	17510	1	NULL	
+2054	338	COPY	glm	437	16859	1	NULL	
+2062	339	COPY	glm	483	20582	1	NULL	
+2068	340	COPY	glm	323	12442	1	NULL	
+2086	345	COPY	glm	503	18720	1	NULL	
+2092	346	COPY	NULL	NULL	11535	0	CLIENT_DISCONNECTED	客户端断开已中断，已产出 312 tokens，按均值估算本次节省约 433 tokens；已产出 445 字符；已停止后续生成。取消原因：客户端断开（发送 delta 事件失败：AsyncRequestNotUsableException）
+2099	347	COPY	glm	445	15817	1	NULL	
+2105	348	COPY	NULL	NULL	15373	0	CLIENT_DISCONNECTED	客户端断开已中断，已产出 416 tokens，按均值估算本次节省约 435 tokens；已产出 582 字符；已停止后续生成。取消原因：客户端断开（发送 delta 事件失败：AsyncRequestNotUsableException）
+2113	349	COPY	glm	435	16621	1	NULL	
+2119	350	COPY	glm	429	13650	1	NULL	
+2126	351	COPY	NULL	NULL	12255	0	CLIENT_DISCONNECTED	客户端断开已中断，已产出 378 tokens，按均值估算本次节省约 434 tokens；已产出 529 字符；已停止后续生成。取消原因：客户端断开（发送 delta 事件失败：AsyncRequestNotUsableException）
+2132	352	COPY	glm	360	10876	1	NULL	
+2140	353	COPY	glm	374	13163	1	NULL	
+2146	354	COPY	glm	369	12159	1	NULL	
+2152	355	COPY	NULL	NULL	14472	0	CLIENT_DISCONNECTED	客户端断开已中断，已产出 403 tokens，按均值估算本次节省约 417 tokens；已产出 593 字符；已停止后续生成。取消原因：客户端断开（发送 delta 事件失败：AsyncRequestNotUsableException）

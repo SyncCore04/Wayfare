@@ -1,0 +1,11 @@
+﻿label,targetChars,ok,itineraryMs,deltaChars,deltaCount,totalMs,note
+ABORT_20pct_1,115,False,58505,115,81,64628,CANCELLED_AT_115_chars
+ABORT_20pct_2,115,False,-1,0,0,1142,EX: 使用“0”个参数调用“ReadLine”时发生异常:“无法从传输连接中读取数据: 远程主机强迫关闭了一个现有的连接。。”
+ABORT_20pct_3,115,False,-1,0,0,8245,EX: 不能对 Null 值表达式调用方法。
+ABORT_50pct_1,286,False,-1,0,0,4086,EX: 不能对 Null 值表达式调用方法。
+ABORT_50pct_2,286,False,-1,0,0,4079,EX: 不能对 Null 值表达式调用方法。
+ABORT_50pct_3,286,False,-1,0,0,4101,EX: 不能对 Null 值表达式调用方法。
+ABORT_80pct_1,458,False,-1,0,0,4076,EX: 不能对 Null 值表达式调用方法。
+ABORT_80pct_2,458,False,-1,0,0,4095,EX: 不能对 Null 值表达式调用方法。
+ABORT_80pct_3,458,False,-1,0,0,4102,EX: 不能对 Null 值表达式调用方法。
+ABORT_20pct_2,115,False,54752,115,77,59244,CANCELLED_AT_115_chars

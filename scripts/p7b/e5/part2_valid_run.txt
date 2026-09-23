@@ -1,0 +1,12 @@
+﻿=== P7-B item5: abort at 20/50/80 pct, baseline=573 chars ===
+ABORT_20pct_1 target=115 ok=False itineraryMs=51696 deltaChars=115 deltaCount=80 totalMs=57175 CANCELLED_AT_115_chars
+ABORT_20pct_2 target=115 ok=False itineraryMs=56735 deltaChars=116 deltaCount=80 totalMs=61460 CANCELLED_AT_116_chars
+ABORT_20pct_3 target=115 ok=False itineraryMs=95960 deltaChars=115 deltaCount=79 totalMs=102641 CANCELLED_AT_115_chars
+ABORT_50pct_1 target=286 ok=False itineraryMs=56405 deltaChars=286 deltaCount=205 totalMs=63576 CANCELLED_AT_286_chars
+ABORT_50pct_2 target=286 ok=False itineraryMs=74102 deltaChars=286 deltaCount=199 totalMs=81373 CANCELLED_AT_286_chars
+=== batch done 2026-09-23T21:05:07.1848505+08:00 ===
+ABORT_50pct_3 target=286 ok=False itineraryMs=42244 deltaChars=288 deltaCount=196 totalMs=49131 CANCELLED_AT_288_chars
+ABORT_80pct_1 target=458 ok=False itineraryMs=89709 deltaChars=458 deltaCount=327 totalMs=101318 CANCELLED_AT_458_chars
+ABORT_80pct_2 target=458 ok=False itineraryMs=101131 deltaChars=458 deltaCount=319 totalMs=112279 CANCELLED_AT_458_chars
+ABORT_80pct_3 target=458 ok=False itineraryMs=70666 deltaChars=458 deltaCount=306 totalMs=82595 CANCELLED_AT_458_chars
+=== batch done 2026-09-23T21:11:52.3439829+08:00 ===

@@ -1,0 +1,8 @@
+﻿=== P7-B item4: streaming timing, 5 full streams, start 2026-09-23T20:39:03.8680360+08:00 ===
+[1] ok=True itineraryMs=55876 doneMs=71318 deltaChars=586 deltaCount=420 totalMs=71322 
+[2] ok=True itineraryMs=69639 doneMs=87220 deltaChars=545 deltaCount=392 totalMs=87220 
+[3] ok=True itineraryMs=65474 doneMs=82416 deltaChars=612 deltaCount=433 totalMs=82416 
+[4] ok=True itineraryMs=114257 doneMs=134906 deltaChars=669 deltaCount=481 totalMs=134906 
+[5] ok=True itineraryMs=49904 doneMs=62400 deltaChars=454 deltaCount=319 totalMs=62400 
+SUMMARY ok=5/5 avgItineraryMs=0 avgDoneMs=0 avgDeltaChars=0
+=== all done 2026-09-23T20:46:22.3438143+08:00 ===
