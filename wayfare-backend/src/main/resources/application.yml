@@ -177,8 +177,19 @@ llm:
       #   max-tokens 只是上限、不是消耗量，实际按产出 token 计费。
       # ⚠️ 历史教训保留：**glm-4.6v-flashx 同样不要当主力**（长输出截断；详见 memory/2026-09-22.md）。
       model: glm-5.3-flash
-      temperature: 0.3
-      max-tokens: 32768
+      # temperature 用官方推荐值 1（模型页原文：「推荐设置：temperature: 1、top_p: 0.95」）。
+      # 实测在这个值下 JSON 输出的结构完整、点位真实（祁寯藻故里景区等），所以不再用 0.3。
+      temperature: 1
+      # max-tokens 16384：给长结构化输出（候选 10~15 个点位、整份行程 JSON）留足空间。
+      # 注意它**不再是**「思考时长」的开关了 —— 思考量由下面的 reasoning-effort 控制，
+      # 所以这里放大是安全的（只有 reasoning-effort 缺省时，放大才会变成「许可它想十几分钟」）。
+      max-tokens: 16384
+      # 🔴 强制思考模型的推理强度（2026-09-23 修长输出挂死的关键开关）。
+      # glm-5.3-flash 不允许关闭思考，不传这个字段时它按默认高档跑 —— 实测同一个候选检索 prompt：
+      #   · 默认档：60s 产出 3556 字思考、正文 0 字（非流式 → 超时且无任何响应，像挂了，其实在想）；
+      #   · low：38.6s 返回 765 字思考 + 900 字正文的完整 JSON。
+      # 合法取值仅 low / high / max（none/minimal/medium 会 400，code 1210）。
+      reasoning-effort: low
     deepseek:
       base-url: https://api.deepseek.com/v1
       api-key: "${DEEPSEEK_API_KEY:}"

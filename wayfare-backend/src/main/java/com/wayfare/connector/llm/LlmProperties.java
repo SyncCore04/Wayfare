@@ -62,6 +62,19 @@ public class LlmProperties {
         private Double temperature = 0.3;
         private Integer maxTokens = 4096;
 
+        /**
+         * 推理强度（`reasoning_effort`）。**只对强制思考的推理模型有意义**，留空则不发送该字段。
+         *
+         * <p>2026-09-23 修 glm-5.3-flash 的长输出挂死时加的。该模型**强制思考、不允许关闭**
+         * （官方原文：`thinking.type` 仅支持 `enabled`），而不发这个字段时它默认按很高的思考量跑 ——
+         * 实测同一个 prompt：默认档 60 秒产出 3556 字思考、正文 0 字；
+         * 换成 `low` 后 **38.6 秒**就返回了「765 字思考 + 900 字正文」的完整 JSON。
+         *
+         * <p>合法取值由服务端决定，GLM 5.3 系列只接受 **`low` / `high` / `max`**
+         * （传 none/minimal/medium 会被 400 拒绝，错误码 1210）。
+         */
+        private String reasoningEffort;
+
         /** 是否已配置可用（没 Key 就等于没这个厂商）。仅判断，不做任何网络调用 */
         public boolean isConfigured() {
             return apiKey != null && !apiKey.isBlank() && baseUrl != null && !baseUrl.isBlank();
@@ -77,6 +90,8 @@ public class LlmProperties {
         public void setTemperature(Double temperature) { this.temperature = temperature; }
         public Integer getMaxTokens() { return maxTokens; }
         public void setMaxTokens(Integer maxTokens) { this.maxTokens = maxTokens; }
+        public String getReasoningEffort() { return reasoningEffort; }
+        public void setReasoningEffort(String reasoningEffort) { this.reasoningEffort = reasoningEffort; }
     }
 
     /** 取某厂商配置，不存在返回 null */

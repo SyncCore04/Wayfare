@@ -71,6 +71,18 @@ public class GlmProvider extends AbstractOpenAiCompatibleProvider {
             // 前提：prompt 里必须含 "json" 字样（基类的 buildJsonSystemPrompt 已保证）
             body.putObject("response_format").put("type", "json_object");
         }
+
+        // 🔴 GLM 5.3 系列**强制思考、不允许关闭**（服务端原文：thinking.type 仅支持 enabled），
+        // 而不指定推理强度时它按很高的思考量跑 —— 实测同一个候选检索 prompt：
+        //   · 默认档：60 秒产出 3556 字思考、**正文 0 字**（非流式调用就是「超时且无响应」，
+        //     看起来像模型挂了，其实是它还在想）；
+        //   · reasoning_effort=low：38.6 秒返回「765 字思考 + 900 字正文」的完整 JSON。
+        // 所以这里必须把强度显式传下去，且做成配置项（别硬编码 —— 不同任务需要的强度不一样）。
+        // 合法取值只有 low / high / max（传 none/minimal/medium 会被 400 拒绝，code 1210）。
+        String effort = config() == null ? null : config().getReasoningEffort();
+        if (effort != null && !effort.isBlank()) {
+            body.put("reasoning_effort", effort.trim());
+        }
     }
 
     /**
