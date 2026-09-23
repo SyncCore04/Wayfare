@@ -412,10 +412,22 @@ public class ItineraryValidator {
     // ==================== 6) TABOO 忌口（★硬约束）====================
 
     /**
-     * 任何 item 的名称或理由里出现忌口食材 → HIGH，必须重排。
+     * 点位<b>名称</b>里出现忌口食材 → HIGH，必须重排。
      *
-     * <p><b>为什么连 reason 也要查</b>：模型可能在理由里写「这家的香菜牛肉面很有名」——
-     * 名字里没有忌口词，但推荐本身就是在推荐用户不能吃的东西。
+     * <p><b>为什么不查 reason（2026-09-23 改的口径，有实测依据）</b>：
+     * P7-B 采集收敛率时发现，扫 reason 会把「执行忌口的说明」判成违规 ——
+     * 模型在理由里写的是「<b>已备注店家全程不放香菜</b>」「点单时已注明不加香菜」这类话，
+     * 也就是它<b>正在遵守</b>硬约束；而本规则的修改建议原文还写着
+     * 「…可要求不加该食材的店，<b>并在 reason 里说明</b>」—— 照着建议做就必然被罚。
+     *
+     * <p>后果不是「判得严一点」，而是<b>永远收不敛</b>：重排后模型仍会写同样的话，
+     * 又判 HIGH，只能耗到轮次上限（实测连续 5 次全是 `rounds=2` + 残留 3~4 条 HIGH，
+     * 收敛率因此恒为 0）。
+     *
+     * <p>忌口是硬约束没错，但它约束的是「<b>推荐什么</b>」，不是「怎么描述」。
+     * 名称才是「推荐对象」，所以只查名称（{@code poiRef}，即候选池里的点位名）。
+     * 代价：模型若在理由里主动安利「香菜牛肉面」而店名不含忌口词，本规则不再拦 ——
+     * 这种情况交给 P3-D 的提示词约束与 P3-B 的候选池过滤兜底（后两者同样是按名称做的）。
      *
      * <p>匹配用的是 {@link TabooMatcher}（与 P3-B 同一套归一化），
      * 所以「不吃辣」能拦住「麻辣火锅」。**字面匹配的局限见该类的说明。**
@@ -432,9 +444,6 @@ public class ItineraryValidator {
             }
             for (TripDraftDTO.ItemDraft item : day.getItems()) {
                 String hit = TabooMatcher.hitTerm(item.getPoiRef(), taboos);
-                if (hit == null) {
-                    hit = TabooMatcher.hitTerm(item.getReason(), taboos);
-                }
                 if (hit != null) {
                     violations.add(Violation.high(RULE_TABOO, day.getDayIndex(), item.getPoiRef(),
                             "「" + item.getPoiRef() + "」命中忌口「" + hit + "」——忌口是硬约束，必须换掉",

@@ -220,9 +220,24 @@ class ItineraryValidatorTest {
     }
 
     @Test
-    @DisplayName("TABOO 连 reason 也查：名字没忌口，但理由里出现「香菜牛肉面」→ HIGH")
-    void tabooScansReasonToo() {
-        TripDraftDTO draft = draft(day(1, item("老张面馆", "FOOD", "11:00", "12:00", "这家的香菜牛肉面很有名")));
+    @DisplayName("TABOO 不查 reason（2026-09-23 改口径）：理由里写「已要求不加香菜」不算违规")
+    void tabooIgnoresReasonMentions() {
+        // 这是 P7-B 实测抓到的真实样本：模型在 reason 里说明自己正在执行忌口，
+        // 旧口径把它判成 HIGH → 每次重排后模型仍这么写 → 永远收不敛（实测 rounds=2 + 残留 HIGH）。
+        TripDraftDTO draft = draft(day(1,
+                item("德庄火锅", "FOOD", "11:00", "12:00", "麻辣锅底符合重辣口味；已备注店家全程不放香菜"),
+                item("老张面馆", "FOOD", "18:00", "19:00", "这家的香菜牛肉面很有名")));
+        UserTravelProfile profile = new UserTravelProfile();
+        profile.setTaboos("香菜");
+
+        // 两条都不再判违规：忌口约束的是「推荐什么」，不是「怎么描述」
+        assertTrue(validator.checkTaboo(draft, profile, null).isEmpty());
+    }
+
+    @Test
+    @DisplayName("TABOO 仍拦名称：名字里带忌口食材 → HIGH（口径收窄后这条必须还在）")
+    void tabooStillFlagsName() {
+        TripDraftDTO draft = draft(day(1, item("香菜牛肉面馆", "FOOD", "11:00", "12:00", "顺路")));
         UserTravelProfile profile = new UserTravelProfile();
         profile.setTaboos("香菜");
         List<Violation> vs = validator.checkTaboo(draft, profile, null);
