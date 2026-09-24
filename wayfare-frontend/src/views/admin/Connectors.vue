@@ -342,10 +342,16 @@ async function loadAll() {
   loading.value = true
   try {
     const [conn, prov, grouped] = await Promise.all([getConnectors(), getLlmProviders(), getConfigs()])
-    applyConnectors(conn)
-    providers.value = prov.providers || []
-    if (prov.activeProvider) llm.activeProvider = prov.activeProvider
-    applyConfigs(grouped)
+    // ⚠️ 必须先取 .data：request.js 的响应拦截器最后 `return res`，
+    // 即把 { code, message, data, timestamp } 整包返回（项目统一惯例，另外 13 个页面都是这么用的）。
+    // 早期这里漏了 .data，导致 applyConnectors 收到的是整包、conn.map 恒为 undefined：
+    //   map.enabled = !!undefined       → 恒 false（表现为「开关点开又自己弹回关闭」）
+    //   llm.enabled = undefined !== false → 恒 true（碰巧显示正确，所以更难发现）
+    //   厂商卡片数 = 0，参数表也全空。
+    applyConnectors(conn.data || {})
+    providers.value = prov.data?.providers || []
+    if (prov.data?.activeProvider) llm.activeProvider = prov.data.activeProvider
+    applyConfigs(grouped.data || {})
   } catch (e) {
     // 拦截器已经弹过错误提示，这里只保证页面不至于卡在 loading
     console.warn('加载连接器状态失败', e)
@@ -448,7 +454,8 @@ async function doPing(name) {
   pinging[name] = true
   try {
     // 指定厂商 ping —— 走的是「不降级」路径，结果才是这一家的真实状态
-    pingResults[name] = await pingLlm(name)
+    // ⚠️ 取 .data：拦截器返回的是整包（见 loadAll 的说明）
+    pingResults[name] = (await pingLlm(name)).data
   } finally {
     pinging[name] = false
   }
@@ -488,7 +495,8 @@ async function clearMapAk() {
 async function doMapPing() {
   mapPinging.value = true
   try {
-    mapPingResult.value = await pingMap(mapPingForm.city, mapPingForm.keyword)
+    // ⚠️ 取 .data：拦截器返回的是整包（见 loadAll 的说明）
+    mapPingResult.value = (await pingMap(mapPingForm.city, mapPingForm.keyword)).data
   } finally {
     mapPinging.value = false
   }
