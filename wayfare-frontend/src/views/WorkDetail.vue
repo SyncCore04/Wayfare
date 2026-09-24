@@ -2,7 +2,7 @@
   <div class="work-detail container" v-loading="loading">
     <template v-if="work">
       <div class="detail-layout">
-        <!-- 左侧：图片展示 -->
+        <!-- 上：图片展示（多图可左右切换） -->
         <div class="image-section">
           <el-carousel :interval="0" arrow="always" class="image-carousel" v-if="images.length > 1">
             <el-carousel-item v-for="(img, idx) in images" :key="idx">
@@ -12,7 +12,7 @@
           <img v-else :src="images[0] || defaultCover" :alt="work.title" class="detail-image single" />
         </div>
 
-        <!-- 右侧：信息区 -->
+        <!-- 下：文案与信息区 -->
         <div class="info-section">
           <h1 class="work-title">{{ work.title }}</h1>
 
@@ -530,50 +530,117 @@ function formatTime(time) {
   padding-bottom: 40px;
 }
 
+/* 上下结构：图片在上（通栏），文案在下。
+   原为「左图右文」flex 横排，侧栏 .info-section 是 sticky 白卡；
+   改成纵向后侧栏语义消失，故一并改为无背景的内容区。 */
 .detail-layout {
   display: flex;
-  gap: 24px;
+  flex-direction: column;
+  gap: 20px;
   margin-bottom: 24px;
-  align-items: flex-start;
+  align-items: stretch;
 }
 
 .image-section {
-  flex: 1;
+  width: 100%;
   min-width: 0;
 }
 
 .image-carousel {
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
+
+  /* el-carousel 默认高度固定 300px，图片改为通栏自适应后会上下留黑边/被裁切，
+     所以这里必须显式给高度。用「视口高度 + 上限」保证不同屏幕都不撑爆首屏。 */
+  height: min(56vh, 520px);
+
+  /* Element Plus 轮播的内部元素高度依赖这个变量，不设会导致图片撑不满容器 */
+  --el-carousel-height: 100%;
+
+  :deep(.el-carousel__container) {
+    height: 100%;
+  }
+
+  :deep(.el-carousel__item) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0f0f10;
+  }
+
+  /* 左右箭头：压暗背景 + 圆形，避免在浅色照片上看不见 */
+  :deep(.el-carousel__arrow) {
+    background: rgba(0, 0, 0, 0.35);
+    width: 42px;
+    height: 42px;
+    font-size: 18px;
+
+    &:hover {
+      background: rgba(0, 0, 0, 0.6);
+    }
+  }
+
+  /* 底部指示器：圆点改为小圆角条，更贴合大图 */
+  :deep(.el-carousel__indicators--horizontal) {
+    bottom: 12px;
+
+    .el-carousel__button {
+      width: 22px;
+      height: 4px;
+      border-radius: 2px;
+      opacity: 0.5;
+    }
+
+    .el-carousel__indicator.is-active .el-carousel__button {
+      opacity: 1;
+    }
+  }
 }
 
 .detail-image {
   width: 100%;
-  max-height: 600px;
+  height: 100%;
+  /* contain 而非 cover：攻略图常含文字/水印，裁切会丢信息；
+     留白用深色底填充，观感比被裁掉半张图好 */
   object-fit: contain;
-  background: #000;
-  border-radius: 10px;
+  background: #0f0f10;
+  display: block;
+}
 
-  &.single {
-    max-height: 600px;
-  }
+/* 单图没有轮播容器，单独给高度约束（原实现靠 max-height，通栏后会过高） */
+.image-section > .detail-image.single {
+  height: min(56vh, 520px);
+  border-radius: 12px;
 }
 
 .info-section {
-  width: 360px;
-  flex-shrink: 0;
-  background: #fff;
-  border-radius: 10px;
-  padding: 24px;
-  position: sticky;
-  top: 80px;
+  width: 100%;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  /* 原来这里是 sticky 侧栏，纵向布局下不再需要 */
+  position: static;
+}
+
+/* 通栏后正文行宽会超过 100 字符，长段落阅读很累。
+   给「文字类」内容限宽并居中；行程时间线、标签、操作栏仍按通栏走。 */
+.work-title,
+.author-bar,
+.trip-meta,
+.work-desc,
+.itinerary-block {
+  max-width: 860px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .work-title {
-  font-size: 22px;
+  font-size: 26px;
+  line-height: 1.4;
   font-weight: 700;
-  margin: 0 0 16px;
-  color: #303133;
+  margin: 0 auto 14px;
+  color: #1f2328;
+  text-align: left;
 }
 
 .author-bar {
@@ -610,11 +677,13 @@ function formatTime(time) {
 }
 
 .work-desc {
-  font-size: 14px;
-  color: #606266;
-  line-height: 1.7;
-  margin-bottom: 16px;
+  font-size: 15px;
+  color: #4a4f57;
+  line-height: 1.85;
+  margin-bottom: 18px;
   white-space: pre-wrap;
+  /* 通栏 + 限宽后，长段落之间留点层次 */
+  letter-spacing: 0.2px;
 }
 
 // 目的地与天数
@@ -949,13 +1018,14 @@ function formatTime(time) {
   }
 }
 
+/* 布局本身已是纵向，断点只需收紧图片高度与间距 ——
+   原断点里「.detail-layout 改 column / .info-section 宽 100%」已由基础样式覆盖，故删去。 */
 @media (max-width: 1024px) {
-  .detail-layout {
-    flex-direction: column;
+  .image-carousel {
+    height: min(48vh, 420px);
   }
-  .info-section {
-    width: 100%;
-    position: static;
+  .image-section > .detail-image.single {
+    height: min(48vh, 420px);
   }
   .similar-grid {
     grid-template-columns: repeat(2, 1fr) !important;
@@ -966,11 +1036,19 @@ function formatTime(time) {
   .work-detail {
     padding: 0 12px;
   }
-  .detail-image {
-    max-height: 400px;
+  .detail-layout {
+    gap: 14px;
   }
-  .info-section {
-    padding: 16px;
+  .image-carousel {
+    height: min(38vh, 300px);
+
+    /* 小屏上箭头会挡住本就不多的画面，交给指示器切换 */
+    :deep(.el-carousel__arrow) {
+      display: none;
+    }
+  }
+  .image-section > .detail-image.single {
+    height: min(38vh, 300px);
   }
   .work-title {
     font-size: 18px;
