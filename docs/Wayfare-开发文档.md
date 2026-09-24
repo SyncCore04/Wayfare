@@ -1185,10 +1185,13 @@ JaCoCo 报告在 `target/site/jacoco/index.html`（已绑 `test` 阶段，无需
 
 ## 十八、部署
 
-> ⚠️ **状态：容器化部署（P8-B）尚未实施** —— 用户明确要求暂缓执行。
-> 本节描述的是**目标方案**，**仓库里目前没有 `Dockerfile` / `docker-compose.yml`**。
-> 现在可用的部署方式就是 [开发文档 §12](#十二配置与密钥管理) + [部署说明](部署说明.md) 里的
-> 「本机直接跑」路线（建库 → Redis → 后端 `mvn spring-boot:run` → 前端 `npm run dev` / `npm run build`）。
+> ⚠️ **状态：容器化部署（P8-B）已开工但尚未落地** —— 用户要求**自己动手写 Docker 相关文件**，
+> 所以**仓库里目前仍然没有 `Dockerfile` / `.dockerignore` / `nginx.conf` / `docker-compose.yml` / `.env.example`**。
+> 本节描述的是**目标方案 + 必须满足的硬约束**；逐步实操教程（面向 WSL + Docker 初学者）见
+> [**部署说明.md**](部署说明.md) —— 那份文档是从「装 Docker」一路写到「首次部署检查清单」的。
+>
+> 现在**立刻可用**的部署方式仍是：建库 → Redis → 后端 `mvn spring-boot:run` → 前端 `npm run dev`，
+> 详见 [部署说明 附录 A](部署说明.md)。
 
 ### 目标方案（未实施）
 
@@ -1208,11 +1211,23 @@ docker-compose
 - 首次部署后需在后台完成：配置 Key → 测试连通性 → 按需开启地图
 - ⚠️ 容器化时**不要重复执行 `schema-trip.sql`** —— 它对 `sys_config` 是 `DROP TABLE` 后重建，
   会把后台改过的厂商 / AK / 单价全部清掉
+- ⚠️ **`db/*.sql` 挂在 `/docker-entrypoint-initdb.d` 只在「数据目录为空」时执行一次**；
+  之后再改 schema 必须手工 ALTER（或删卷清库重来）
+- 🔴 **nginx 必须关缓冲 + 加长读超时**，否则 SSE 会被攒批 / 60 秒掐断：
+  表现是「生成行程一直转圈」。`proxy_read_timeout` 要大于 `trip.sse-timeout-ms`（默认 600000 ms）
+- 🔴 **`/uploads` 要反代到后端的 `/api/uploads`**（后端在 context-path 内映射该路径），
+  漏掉这条 = 所有图片裂掉
 
 **实施前必须补的三件事**（否则容器起来也是坏的）：
-1. 前端需要在构建时注入 `VITE_BAIDU_MAP_AK`（若要做地图可视化）
-2. `file.upload.upload-dir` 目前是写死的绝对路径 `D:/Code/...`，容器里必须换成卷挂载路径并可配置
-3. 上传目录需 volume 挂载，否则重建容器会丢图
+1. 🔴 **`file.upload.upload-dir` 必须先改成可被环境变量覆盖**（目前是写死的 `D:/Code/...`，
+   容器里不存在 `D:` 盘）—— 具体那 1 行改法见 [部署说明 §4](部署说明.md)
+2. 上传目录需 volume 挂载，否则重建容器会丢图
+3. 前端若要做地图可视化，需要在**构建期**注入 `VITE_BAIDU_MAP_AK`
+   （⚠️ **不是**手册写的 `BAIDU_MAP_JS_AK`；且**当前前端未接入 JS API**，配了也不会画地图）
+
+> ⚠️ **`LLM_ACTIVE_PROVIDER` / `MAP_ENABLED` 这类环境变量会被 L2（`sys_config`）静默覆盖**
+> —— `sys_config` 的值由 MySQL 首次初始化时从 `schema-trip.sql` 写入。
+> 想改厂商 / 开地图，**起完去后台 `/admin/connectors` 改**（≤30 秒生效），或改脚本里的 INSERT。
 
 ---
 
