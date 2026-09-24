@@ -65,10 +65,17 @@ L3 降级         熔断器 + 分级 Provider  主力挂了切备用，全挂了
 - 管理接口与公开接口的边界由白名单显式定义，公开路径用正则约束（`/works/{id:[0-9]+}`）避免把 `/works/my` 一并放行。
 - 密钥全部走环境变量或 gitignore 的本地配置文件，仓库内不含任何真实 Key；所有回显一律掩码（前 4 位 + `****`）。
 
-### 5. 流式输出：把「等五分钟」拆成「先看到行程」
+### 5. 流式输出：把「等一分钟」拆成「先看到行程」
 
-同步接口实测一次生成要 **194~507 秒**（骨架本身要 3 次大模型调用，主力模型屡次在 90 秒超时后才降级到备用厂商），
-浏览器与 axios 的默认超时都撑不到——用户只会看到一个转圈然后失败。所以生成走 SSE，事件分五类：
+一次完整生成要跑 **3 次非流式大模型调用**（意图解析 / 候选检索 / 行程编排），**骨架阶段根本没法边想边吐**；
+P7 实测（`docs/metrics.md` 第四项，5 次）：
+
+| 模型 | 骨架（`itinerary` 事件） | 全文（`done`） | 骨架占比 |
+|---|---|---|---|
+| `glm-5.3-flash` | **71.0 s** | **87.7 s** | 81% |
+| `deepseek-flash` | — | **9.2 s**（整轮） | — |
+
+浏览器与 axios 的默认超时都撑不到，用户只会看到一个转圈然后失败。所以生成走 SSE，事件分五类：
 
 ```
 stage（六阶段进度）→ itinerary（行程骨架）→ delta（攻略文案增量）→ done / error
@@ -77,10 +84,20 @@ stage（六阶段进度）→ itinerary（行程骨架）→ delta（攻略文�
 关键在于 **`itinerary` 与 `delta` 的分工就是降级出口**：行程骨架（Step 6 事实补全后立即推送）一旦送达，
 攻略文案哪怕整段生成失败，用户手里也已经有一份带可信度角标的完整行程——**文案是锦上添花，不是必需项**。
 
-客户端断开时，增量回调里抛异常即可掐断上游的读取循环（连接器层不需要新增取消 API）；
-已生成的部分照常计费，**未生成的部分是真省下来的**。中断会落一条 `success=0 + CLIENT_DISCONNECTED` 的日志，
-并用「同类请求历史 `completion_tokens` 均值」估算本次省下多少——
-**拿不到 usage 时如实写「未知」，绝不按字符数换算一个 token 数出来。**
+> ⚠️ 手册原定的目标「骨架 ~15 秒」**架构上做不到**，如实写进 `docs/metrics.md` 第四项。
+
+客户端断开时，增量回调里抛异常即可掐断上游的读取循环（连接器层不需要新增取消 API），
+中断会落一条 `success=0 + CLIENT_DISCONNECTED` 的日志。但**这条链路的实际效果比设计预期弱得多**，
+P7 用 9 次实测把它量了出来（`docs/metrics.md` 第五项）：
+
+- **「客户端断开即中断 LLM 流」只有 3/9 成立** —— 另 6 次模型把整篇生成完并照常落库。
+  原因：检测点是「下一次 `send()` 抛异常」，而 delta 写入平均只有 **1.4 字符/块**，
+  被 socket 缓冲吸收后 `send()` 会一直成功，服务端察觉不到。
+- **日志里那句「节省约 N tokens」高估约 14 倍** —— 它取的是「同类请求整篇输出的均值」，
+  **没有减去已产出的部分**。实测自报 429 / 已产出 399 → 真实净节省只有约 **30 tokens**。
+
+所以本项目对这条能力的口径是：**价值在于「不落库半成品数据」，不在于省成本**；
+拿不到 usage 时如实写「未知」，**绝不按字符数换算一个 token 数出来**。
 
 ### 6. 后台可观测性：开关能当场拨、降级能当场演示
 
@@ -131,6 +148,33 @@ powershell -ExecutionPolicy Bypass -File scripts\drill-fallback.ps1 -SkipFaultIn
 - **安全验收点就是页面本身**：外呼日志页签直接展示 `request_summary`，而它是**写入时**脱敏的
   （先脱敏再截断，顺序不能反），所以页面上看到的必然是 `ak=abcd****` 这种形态。
 
+## 实测指标（数字全部来自本机真实运行，不抄外部数据）
+
+> 完整测量方法、原始数据、失败样本与诚实提醒见 **[`docs/metrics.md`](docs/metrics.md)**；
+> 降级演练见 **[`docs/drill-report.md`](docs/drill-report.md)**；
+> 2-opt 量化见 **[`docs/metrics-preorder.md`](docs/metrics-preorder.md)**。
+
+| 指标 | 实测结论 | 口径与诚实提醒 |
+|---|---|---|
+| **2-opt 空间预排** | 当候选顺序存在明显交叉时，总里程再降 **9%~25%**；顺直点集改进为 **0** | 不能写「平均降 9.3%」（那会把两组 0% 平摊掉） |
+| **POI 缓存冷热** | 冷 **329 ms / P95 620 ms** → 热 **8.4 ms / P95 9 ms**（**快 39×**），20 次热调对外 HTTP 请求 **0** 次 | 这是**单次检索**的收益；一轮规划约 6 次检索 ≈ 省 1.9 s，占整条管线 82 s 的 **2%** —— 价值在**省配额与抗限流**，不在缩短整轮耗时 |
+| **校验收敛率** | 30/30 次生成，**两轮内收敛 90.0%** | 不能报「100%」——那是把「只有 MEDIUM 时只排一次」误当收敛 |
+| **流式输出时间** | 骨架 **71.0 s** / 全文 **87.7 s**（glm），骨架占 **81%**；deepseek 整轮 **9.2 s** | 手册目标「骨架 ~15 s」**架构上做不到**（要等 3 次非流式调用） |
+| **客户端断开中断** | **9 次只有 3 次真掐断**；真实净节省仅约 **30 tokens** | 「断开即中断」只有 1/3 成立，价值在**不落半成品数据** |
+| **单次生成成本** | `deepseek-flash` **4,888 tok / ¥0.0107 / 9.2 s**；`glm-5.3-flash` 5,436 tok / **¥0.0084** / 62.6 s | 性价比要看**单次总成本**而非单价：deepseek 单价更高但输出更省，总价只贵 27%、快 6.8 倍；成本要带时段（DeepSeek 峰谷价，高峰上限约 ¥0.021） |
+
+**一个被实测淘汰的选项**：`qwen3.8-flash`（免费档）实测 **476 s/次、失败率 55%、输出 token 是另两家的 13~16 倍**
+（推测思维链计入 `completion_tokens`）。**「免费」在这里是陷阱 —— 一次 qwen 的 token 量够 deepseek 跑 6.5 次。**
+
+**降级演练（一条命令，20 条断言全绿）**：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\drill-fallback.ps1
+```
+
+关掉地图后仍产出**结构完整可执行的行程**（10 个条目），只是 `verifyStatus` 全为 `ESTIMATED`、距离字段留空、
+文案不再给精确数字；故障注入（把百度 AK 写坏触发熔断）后 **`mode` 自动降为 `CACHED`、生成流程不中断**。
+
 ## 技术栈
 
 | 层 | 选型 | 说明 |
@@ -155,7 +199,9 @@ mysql -u root -p < db/schema-trip.sql
 # 3. 配置密钥与数据库密码（本文件已被 gitignore，仓库内只有 .example 模板）
 cd wayfare-backend
 copy .env.properties.example .env.properties
-#   编辑 .env.properties，填入 MYSQL_ROOT_PASSWORD 与 QWEN_API_KEY（或 GLM_API_KEY）
+#   编辑 .env.properties：MYSQL_ROOT_PASSWORD 必填；
+#   三家大模型 Key（QWEN / GLM / DEEPSEEK）与 BAIDU_MAP_AK 都可不填 ——
+#   不填大模型 Key 自动回落离线 Mock，不填地图 AK 自动走估算模式，全链路照常演示
 
 # 4. 启动后端（8080，context-path /api）
 mvn spring-boot:run
@@ -181,6 +227,100 @@ npm run dev
 - 生成明细：`GET /api/admin/generation/logs?from=&to=&success=&stage=&model=&destination=&mapMode=&page=&size=`（管理员）
 - 外呼日志：`GET /api/admin/generation/external-calls?connector=&page=&size=`（管理员，`request_summary` 已脱敏）
 - 厂商清单与状态：`GET /api/diagnostics/llm/providers`（管理员，模型名 / Base URL / 掩码 Key / 熔断快照）
+
+## 接口清单
+
+> 本节由 [`scripts/gen-api-list.py`](scripts/gen-api-list.py) **从真实注解自动生成**，请勿手改 ——
+> 手写清单一定会和代码漂移。完整清单（含每个端点的说明与权限）见 [`docs/接口清单.md`](docs/接口清单.md)。
+>
+> 重新生成：
+> ```bash
+> "C:/Users/Apollo/.workbuddy-ai/binaries/python/versions/3.13.12/python.exe" scripts/gen-api-list.py
+> ```
+
+<!-- BEGIN:API-LIST -->
+
+| Controller | 端点数 | 公开 | 管理员 | 类级路径 |
+|---|---|---|---|---|
+| `AdminConfigController` | 6 | 0 | 6 | `/admin` |
+| `AdminGenerationController` | 5 | 0 | 5 | `/admin/generation` |
+| `AuthController` | 3 | 2 | 0 | `/auth` |
+| `CategoryController` | 6 | 1 | 4 | `/categories` |
+| `CommentController` | 6 | 1 | 0 | `/comments` |
+| `DiagnosticsController` | 4 | 0 | 4 | `/diagnostics` |
+| `FavoriteController` | 4 | 0 | 0 | `/favorites` |
+| `FileController` | 3 | 0 | 0 | `/files` |
+| `FollowController` | 9 | 0 | 0 | `/follows` |
+| `HealthController` | 1 | 1 | 0 | `` |
+| `LikeController` | 4 | 0 | 0 | `/likes` |
+| `LlmDiagnosticController` | 3 | 0 | 3 | `/connector/llm` |
+| `MapDiagnosticController` | 4 | 0 | 4 | `/connector/map` |
+| `MessageController` | 6 | 0 | 0 | `/messages` |
+| `RecommendController` | 7 | 1 | 0 | `/recommend` |
+| `TagController` | 7 | 1 | 4 | `/tags` |
+| `TravelProfileController` | 2 | 0 | 0 | `/profile` |
+| `TripController` | 10 | 0 | 0 | `/trip` |
+| `UserController` | 7 | 0 | 3 | `/users` |
+| `WorkController` | 8 | 5 | 0 | `/works` |
+| **合计** | **105** | **12** | **33** | — |
+
+> 完整清单（含每个端点的说明与权限）见 [`docs/接口清单.md`](docs/接口清单.md)，由 `scripts/gen-api-list.py` 从真实注解生成。
+
+<!-- END:API-LIST -->
+
+## 数据表清单（22 张）
+
+| 脚本 | 域 | 张数 | 表 |
+|---|---|---|---|
+| `db/schema.sql` | 内容域（沿用旧项目表名） | 14 | `sys_user` `user_third_account` `category` `tag` `work` `work_image` `work_tag` `comment` `like_record` `favorite` `follow` `private_message` `report` `admin_operation_log` |
+| `db/schema-trip.sql` | 行程域 + 治理域 | 8 | `sys_config` `poi_cache` `external_call_log` `user_travel_profile` `trip` `trip_day` `trip_item` `ai_generation_log` |
+
+> ⚠️ `trip` 表**没有任何外键约束** —— 删行程必须手工按序清理 `trip_day` / `trip_item` /
+> `ai_generation_log` / `external_call_log`，否则会留下孤儿行（已实测踩过）。
+
+## Redis key 设计
+
+| 用途 | key 格式 | TTL | 写入位置 |
+|---|---|---|---|
+| 系统配置缓存 | `sys:config`（Hash） | 30 s | `SysConfigServiceImpl` —— 「L2 配置 30 秒内生效」就来自这里 |
+| POI 检索 | `map:poi:baidu:{city}:{keyword}:{pageNum}:{pageSize}` | 24 h | Spring Cache（`CacheConfig`） |
+| POI 详情 | `map:detail:{poiUid}` | 7 d | Spring Cache |
+| 路线 | `map:route:{mode}:{fromLng},{fromLat}:{toLng},{toLat}` | 12 h | `LocalCacheMapProvider` **直连 Redis**（熔断降级时也要能读到同一份） |
+| 熔断失败计数 | `cb:fail:{provider}` | — | `CircuitBreaker` |
+| 熔断打开标记 | `cb:open:{provider}` | `*.breaker.open-seconds`（地图 300 s） | `CircuitBreaker` |
+| JWT 黑名单 | `auth:blacklist:{token 的 SHA-256}` | 取 token 剩余有效期 | `TokenBlacklist`（登出时写入） |
+| 浏览历史 / 社交计数 | `browse:history:*`、`browse:tags:*`、`like:count:*`、`favorite:count:*`、`follow:follower:*`、`follow:following:*` | — | 内容域 |
+
+> **大模型调用一律不缓存** —— 同一个输入需要能拿到可复现的新结果，缓存会让「换个说法再问一次」看起来没反应。
+>
+> ⚠️ 已知缺陷（未修）：POI 检索的**空结果也会被缓存 24 h** —— `disableCachingNullValues()` 只挡 `null`、
+> 不挡空 `List`，而查不到时返回的正是空 List。后果是**用户搜一个百度查不到的词，24 小时内再搜都直接返回空**。
+> 修法只有一行（`@Cacheable` 加 `unless = "#result == null || #result.isEmpty()"`），见交接文档 §7.1。
+
+## 环境变量
+
+`wayfare-backend/.env.properties`（**已 gitignore，仓库内只有 `.env.properties.example` 模板**）：
+
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `MYSQL_ROOT_PASSWORD` | ✅ | 数据库密码 |
+| `QWEN_API_KEY` | ⬜ | 阿里云百炼（免费档）；不填则该厂商不可用 |
+| `GLM_API_KEY` | ⬜ | 智谱开放平台 |
+| `DEEPSEEK_API_KEY` | ⬜ | DeepSeek 开放平台 |
+| `BAIDU_MAP_AK` | ⬜ | 百度地图 Web 服务 AK；不填则地图整体不可用（自动走估算模式） |
+
+> **三个大模型 Key 全都不填也能跑**：自动回落内置离线 Mock，全链路（含前端流式渲染）照常演示。
+> 数据库 / Redis 连接地址、模型名、超时属 **L1 启动期配置**，在 `application.yml` 里，**改完必须重启**；
+> 切厂商 / 开关地图 / 熔断阈值属 **L2 运行期配置**，在 `sys_config` 里，**改完 30 秒内生效、不用重启**。
+
+## 测试账号
+
+| 账号 | 密码 | 角色 |
+|---|---|---|
+| `admin` | `Admin123456` | 管理员（可进 `/admin/connectors` 与 `/admin/generation`） |
+
+> 这是**演示凭据**，写在 README 里是有意的（答辩/面试要能直接登录看后台），不是泄漏。
+> 新增真实账号请走 `POST /api/auth/register`，**不要把任何真实密码写进仓库**。
 
 ## 目录结构
 
@@ -213,7 +353,7 @@ Wayfare/
 
 ## 工程实践
 
-- **测试**：236 个单元 / 集成测试全绿（另有 6 个真实调用大模型与地图的验收测试默认跳过，
+- **测试**：238 个单元 / 集成测试全绿（另有 6 个真实调用大模型与地图的验收测试默认跳过，
   用 `-Dwayfare.live=true` 显式开启），覆盖脱敏规则（6）、出站重试与降级策略（13）、
   用户画像渲染规则（11）、画像读写与 upsert 的 null 语义（7）、行程表族排序与数据诚信字段（5）、
   AI 日志聚合与成本计算（20，含输入输出分开计价与统计聚合）、实体与表结构映射（4）、
@@ -254,8 +394,8 @@ Wayfare/
 | P4 | SSE 流式输出 / 成本控制 | ✅ 已完成（P4-A 五类事件的 SSE 通道与断线掐流；P4-B 攻略文案流式生成、画像融入与 `guide_text` 落库、`regenerate-copy` 只重生成文案；P4-C 输入输出分开计价、按行程分阶段拆解 token 与成本、中断节省量化，以及 `GET /api/admin/generation/stats` 聚合接口） |
 | P5 | 前端偏好中心 / AI 规划交互 / 首页与详情页 / 体验收尾 | ✅ 已完成（P5-A 旅行偏好 11 字段 + 隐私开关；P5-B 四步规划流程与原生 fetch 流式渲染；P5-C 首页筛选与攻略详情页行程区块、AI 生成角标、403 语义；P5-D 全局加载条、生成中离开确认、错误码翻译、我的行程页、移动端适配；另补「发布为攻略」链路 `PUT /trip/{id}/publish`） |
 | P6 | 后台管理：连接器开关与 AI 监控 | ✅ 已完成（P6-A `/admin/connectors`：厂商切换 / 降级顺序 / 地图总开关与 AK / 一键降级演练 / 行程参数与单价热改；P6-B `/admin/generation`：统计卡片 + 四张图表 + 生成明细分页 + 外呼日志页签） |
-| P7 | 测试、指标埋点与降级演练 | ⏳ 进行中（**P7-A 已完成**：新增管理接口安全集成测试与离线全链路集成测试，重点类覆盖率达标并出具测试用例表与缺陷清单；P7-B 量化指标 / P7-C 降级演练脚本待做） |
-| P8 | 文档同步与部署 | ⏳ 规划中 |
+| P7 | 测试、指标埋点与降级演练 | ✅ 已完成（**P7-A** 管理接口安全集成测试 + 离线全链路集成测试，`trip` 包行覆盖 86.2%，产出测试用例表与缺陷清单；**P7-B** 六项量化指标全部实测并汇总到 `docs/metrics.md`，含 2-opt、缓存冷热、校验收敛率、流式时间、中断节省、单次成本；**P7-C** `scripts/drill-fallback.ps1` 端到端降级演练，20 条断言全绿并自动产出 `docs/drill-report.md`） |
+| P8 | 文档同步与部署 | 🔨 进行中（**P8-A** 文档与代码对齐 —— README 已重写并接入自动生成的接口清单；`Wayfare开发文档.md` / `部署说明.md` 待更新。**P8-B** Docker 部署：用户明确要求暂缓） |
 
 ---
 
