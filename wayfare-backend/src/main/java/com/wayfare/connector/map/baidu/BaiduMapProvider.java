@@ -141,7 +141,13 @@ public class BaiduMapProvider implements MapProvider {
      */
     @Override
     @Cacheable(cacheNames = CacheConfig.CACHE_MAP_POI,
-            key = "'baidu:' + #query.city + ':' + #query.keyword + ':' + #query.pageNum + ':' + #query.pageSize")
+            key = "'baidu:' + #query.city + ':' + #query.keyword + ':' + #query.pageNum + ':' + #query.pageSize",
+            // ⚠️ unless 必须同时挡住 null 与**空列表**：
+            //   CacheConfig.disableCachingNullValues() 只对 null 生效，对空 List 无效，
+            //   结果「该城市搜不到这个关键词」会被缓存 24 小时（CACHE_MAP_POI 的 TTL），
+            //   期间即使百度侧已能搜到也永远命中这个空缓存 —— 表现为「有些点位怎么都搜不出来」。
+            //   detail() 早就有 unless = "#result == null"，POI 检索这一处当初漏了。
+            unless = "#result == null || #result.isEmpty()")
     public List<PoiDTO> searchPoi(PoiQueryDTO query) {
         if (query == null || (!StringUtils.hasText(query.getKeyword()) && !StringUtils.hasText(query.getTag()))) {
             throw new MapProviderException(ResultCode.MAP_REQUEST_FAILED, PROVIDER_NAME, "关键词与标签至少填一个");
