@@ -54,7 +54,8 @@ L3 降级         熔断器 + 分级 Provider  主力挂了切备用，全挂了
 
 所有外部 HTTP 调用（Qwen / GLM / DeepSeek / 百度地图）走同一个治理封装：
 
-- **重试**：仅 GET 重试（指数退避），POST 一律不重试——重复调用可能产生费用；4xx 除 429 外不重试——客户端错误重试无意义。
+- **重试**：GET 失败重试 2 次（退避 200 ms / 600 ms），POST 默认不重试——重复调用可能产生费用。
+  **唯一例外是 HTTP 429**（退避 1 s / 3 s）：限流等一会儿确实会好，而 4xx 客户端错误重试无意义。
 - **日志**：每次尝试落一条 `external_call_log`（连接器、接口、耗时、成败、脱敏后的请求摘要），是成本统计与监控看板的数据源。
 - **脱敏**：AK / API Key / Bearer 凭证在写日志前统一过 `MaskUtil`，库里不允许出现完整密钥。
 - **缓存**：POI 检索 24h、详情 7d、路线 12h（Redis），**大模型调用一律不缓存**——同一个输入需要可复现的新结果。
@@ -190,7 +191,7 @@ powershell -ExecutionPolicy Bypass -File scripts\drill-fallback.ps1
 ## 快速开始
 
 ```bash
-# 1. 环境要求：JDK 17、Maven 3.6+、Node 16+、MySQL 8.0、Redis 6+
+# 1. 环境要求：JDK 17、Maven 3.9+、Node 18+（Vite 5 要求）、MySQL 8.0、Redis 7
 
 # 2. 建库（两份脚本：内容域 + 行程域，均幂等）
 mysql -u root -p < db/schema.sql
@@ -205,7 +206,7 @@ copy .env.properties.example .env.properties
 
 # 4. 启动后端（8080，context-path /api）
 mvn spring-boot:run
-#    启动日志会自检：LLM 厂商配置状态 / 地图开关状态，一眼可见
+#    启动日志末尾会打印「Wayfare 后端启动成功」与接口文档 / 健康检查地址
 
 # 5. 启动前端（5173，已代理 /api 与 /uploads）
 cd ../wayfare-frontend
@@ -367,7 +368,8 @@ Wayfare/
   **管理接口的权限边界与密钥不外泄（12，含热生效与熔断可观测）**、
   **离线全链路的降级诚实性（2：地图关闭时全 ESTIMATED、距离时长必须为空）**。
 - **覆盖率与缺陷清单**：`mvn test` 会自动生成 JaCoCo 报告（`target/site/jacoco/index.html`）。
-  核心管线（`trip` 包）行覆盖 **86.2%**，`PreOrderService` 99.1%、`ItineraryValidator` 93.5%。
+  核心管线（`trip` 包）行覆盖 **85.4%**、`PreOrderService` 99.1%、`ItineraryValidator` 93.5%
+  （2026-09-24 复核实测；P7-A 结项时为 86.2% —— 主代码在其后有 3 次提交，差在测量时点）。
   测量口径、未覆盖项与原因见 [`docs/测试用例表.md`](docs/测试用例表.md)；
   推进过程中由测试与真实联调抓出的 9 个真实缺陷及修复见 [`docs/已知缺陷与修复.md`](docs/已知缺陷与修复.md)。
 - **连接器是"实测驱动"的，不是照文档抄的**：地图与大模型的每个参数都拿真实 Key 逐组打过，
@@ -383,6 +385,35 @@ Wayfare/
 - **AI 辅助开发的工程化**：本项目使用"任务块"方式驱动 AI 编码——每个任务块有独立的目标、交付物与验收标准，AI 读完复述确认后才动手，跑通一块再投喂下一块。全套实施手册与设计文档暂未开源，需要的可以通过 issue 联系我。
 - **命名纪律**：仓库内不允许出现旧项目残留（`photoshare` / `photo-share`），验收时以 grep 结果为零为准。
 
+## 文档
+
+| 文档 | 给谁看 |
+|---|---|
+| [`docs/部署说明.md`](docs/部署说明.md) | 要把它跑起来的人：环境要求、各 Key 的申请与配置、如何关地图 / 用 mock 模式、**常见故障排查表** |
+| [`docs/Wayfare-开发文档.md`](docs/Wayfare-开发文档.md) | 答辩 / 写论文 / 架构答疑：架构图、七步管线、三层开关、表结构、接口清单、SSE 协议、降级矩阵、可观测性、已知局限 |
+| [`docs/交付说明.md`](docs/交付说明.md) | 验收：功能 → 实现位置 → 验证方式对照表 + 诚实局限清单 |
+| [`docs/接口清单.md`](docs/接口清单.md) | 105 个端点全量清单（**脚本自动生成，勿手改**） |
+| [`docs/metrics.md`](docs/metrics.md) / [`docs/metrics-preorder.md`](docs/metrics-preorder.md) | 六项量化指标的原始数据与口径 |
+| [`docs/drill-report.md`](docs/drill-report.md) | 降级演练报告（含可直接进 PPT 的对比表） |
+| [`docs/测试用例表.md`](docs/测试用例表.md) / [`docs/已知缺陷与修复.md`](docs/已知缺陷与修复.md) | 测试覆盖口径 / 推进过程中抓出并修掉的缺陷 |
+
+## 已知局限（如实列出）
+
+这份清单是刻意写出来的 —— 被问出来不如自己先说，**「发现了但权衡后没改」本身就是工程判断力**。
+完整版（含每条的影响与未修原因）见 [`docs/Wayfare-开发文档.md` §19](docs/Wayfare-开发文档.md#十九已知局限与扩展方向)。
+
+- **前端没有地图可视化**：未接入百度地图 JS API。无坐标（估算模式）时给明确占位文案而不是空白地图；
+  有坐标时也只会提示点位数量。这是**未实现项**，不是降级效果。
+- **客户端断开只有约 1/3 能真正掐断上游生成**；日志里那句「节省 N tokens」高估约 14 倍。
+- **`meta.tokens` / `meta.estCost` 会被相邻行程污染**（未按 `trip_id` 查），取数请用
+  `ai_generation_log` 按 `trip_id` 聚合或 `/api/admin/generation/trips/{tripId}/breakdown`。
+- **空检索结果会被缓存 24 小时**（`disableCachingNullValues()` 只挡 `null`、不挡空 List）。
+- **没有接口级限流**；**管理员操作日志表只有实体与 Mapper，没有写入代码**。
+- **`qwen3.8-flash` 已不可用**（476 s/次、失败率 55%）；**`glm-5.3-flash` 必须显式下发 `reasoning-effort`**，
+  **`deepseek-flash` 必须显式下发 `reasoning_effort`** —— 两个系列都是推理模型，不传强度会按默认高档跑，
+  表现为「请求超时、什么都不返回」。
+- **容器化部署（Docker）尚未实施**，仓库内没有 `Dockerfile`。
+
 ## 开发进度
 
 | 阶段 | 内容 | 状态 |
@@ -395,7 +426,7 @@ Wayfare/
 | P5 | 前端偏好中心 / AI 规划交互 / 首页与详情页 / 体验收尾 | ✅ 已完成（P5-A 旅行偏好 11 字段 + 隐私开关；P5-B 四步规划流程与原生 fetch 流式渲染；P5-C 首页筛选与攻略详情页行程区块、AI 生成角标、403 语义；P5-D 全局加载条、生成中离开确认、错误码翻译、我的行程页、移动端适配；另补「发布为攻略」链路 `PUT /trip/{id}/publish`） |
 | P6 | 后台管理：连接器开关与 AI 监控 | ✅ 已完成（P6-A `/admin/connectors`：厂商切换 / 降级顺序 / 地图总开关与 AK / 一键降级演练 / 行程参数与单价热改；P6-B `/admin/generation`：统计卡片 + 四张图表 + 生成明细分页 + 外呼日志页签） |
 | P7 | 测试、指标埋点与降级演练 | ✅ 已完成（**P7-A** 管理接口安全集成测试 + 离线全链路集成测试，`trip` 包行覆盖 86.2%，产出测试用例表与缺陷清单；**P7-B** 六项量化指标全部实测并汇总到 `docs/metrics.md`，含 2-opt、缓存冷热、校验收敛率、流式时间、中断节省、单次成本；**P7-C** `scripts/drill-fallback.ps1` 端到端降级演练，20 条断言全绿并自动产出 `docs/drill-report.md`） |
-| P8 | 文档同步与部署 | 🔨 进行中（**P8-A** 文档与代码对齐 —— README 已重写并接入自动生成的接口清单；`Wayfare开发文档.md` / `部署说明.md` 待更新。**P8-B** Docker 部署：用户明确要求暂缓） |
+| P8 | 文档同步与部署 | 🔨 进行中（**P8-A** 文档与代码强制对齐：README 重写并接入自动生成的接口清单、`Wayfare-开发文档.md` 全量更新为 Wayfare 版、`部署说明.md` 与 `交付说明.md` 新建，六项一致性校验逐条给出证据。**P8-B** Docker 部署：用户明确要求暂缓，**尚未实施**） |
 
 ---
 
