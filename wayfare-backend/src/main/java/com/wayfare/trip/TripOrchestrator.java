@@ -615,7 +615,11 @@ public class TripOrchestrator {
         if (IntentDTO.TRANSPORT_DRIVE.equals(t)) {
             return "驾车约十几分钟";
         }
-        return "约 15 分钟左右可达";
+        // 🔴 2026-09-24 修：兜底分支原为「约 15 分钟左右可达」——**含精确数字 15**，
+        // 违反了本方法自己的约定（禁止给精确数字），也让「地图关闭时不出现精确时长」
+        // 这条验收断言失败（P7-C 演练 A7 抓到的，实测 11 个条目全部命中）。
+        // 用户没说交通方式时会走这一支，所以它出现频率很高。
+        return "约十几分钟可达";
     }
 
     private void runConcurrent(List<Runnable> tasks, int maxParallel) {

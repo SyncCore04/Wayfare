@@ -90,9 +90,39 @@ stage（六阶段进度）→ itinerary（行程骨架）→ delta（攻略文�
 - **改配置不重启**：`PUT /admin/configs/{key}` 写库后立即清 Redis 缓存。验证口径也是可执行的 ——
   「先读一次（把值灌进缓存）→ 写新值 → 立刻再读」，能读回新值才说明缓存真被清了
   （读一个直查数据库的接口是证明不了这件事的）。
-- **一键降级演练**：一个按钮关掉地图能力，之后的生成 `verifyStatus` 全为 `ESTIMATED`、
+- **一键降级演练**：后台有个按钮关掉地图能力，之后的生成 `verifyStatus` 全为 `ESTIMATED`、
   距离与时长留空并标注「估算」、`mapMode=ESTIMATED`，**系统功能不受影响**；
   且关闭后零外部调用，不消耗任何地图额度。这正是「连接器可插拔」的现场证明。
+  按钮只是「拨开关」，**要出证据请跑脚本**（见下）。
+
+#### 端到端降级演练脚本（一条命令出报告）
+
+```powershell
+# 仓库根目录执行（后端需已启动）
+powershell -ExecutionPolicy Bypass -File scripts\drill-fallback.ps1
+# 只想看降级对比、不做故障注入：
+powershell -ExecutionPolicy Bypass -File scripts\drill-fallback.ps1 -SkipFaultInjection
+```
+
+跑完「降级 → 验证 → 恢复 → 验证 → 出报告」全流程，做 **20 条断言**并把结果写进
+[`docs/drill-report.md`](docs/drill-report.md)（含一张可直接复制进 PPT 的对比表）：
+
+| 阶段 | 做什么 | 关键断言 |
+|---|---|---|
+| A 关地图 | 生成一次行程 | 全部条目 `verifyStatus=ESTIMATED`、`distanceMeters` 全空、`meta.mapMode=ESTIMATED`、**文案里不出现「N 公里」「N 分钟」这类精确数字** |
+| B 开地图 | 同输入再生成一次 | 诊断接口 `mode=VERIFIED`、存在 `VERIFIED` 条目、存在有距离的条目 |
+| C 故障注入 | 把 `map.baidu.ak` 临时写成非法值，连续触发 5 次失败 | 熔断打开 → `mode` 降为 `CACHED`、`degraded=true`，**生成流程不中断**（仍返回 tripId） |
+| 收尾 | 恢复 `map.enabled` 与 AK、复位熔断 | 状态回到演练前 |
+
+注意事项（脚本里都写明了）：
+
+- 会临时改动 `map.enabled` 与 `map.baidu.ak` 两个 **L2 配置**（改完立即生效、不用重启），
+  **脚本结束自动恢复原值**；
+- **阶段 B 会真实调用百度地图，消耗日配额**（约 6 次地点检索）；
+- 故障注入前会**先清 Redis 里的 POI 缓存**，否则请求命中缓存就测不到熔断（这是本脚本踩过的坑）；
+- 断言失败时**明确报出是哪一条、实际值是什么**，并以退出码 1 结束 —— 不吞失败。
+  首轮演练就靠它抓到过一个真缺陷：估算模式的兜底文案 `约 15 分钟左右可达` **带精确数字**，
+  与它自己声明的「禁止给精确数字」矛盾（已修）。
 - **诊断信息必须与事实一致**：`GET /diagnostics/llm/providers` 逐厂商返回模型名、Base URL、
   **掩码后的 Key**（前 4 位 + `****`）、可用性与熔断快照。这里修过一个真 bug —— 熔断快照原先写死读
   `map.breaker.*`，于是大模型被显示成「阈值 5」，而它实际第 3 次失败就跳闸：**诊断信息说谎比没有信息更坏**。
